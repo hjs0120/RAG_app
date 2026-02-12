@@ -30,6 +30,7 @@
 | 10 | 검수 탭 — PDF 뷰어 위 bbox 표시 | ☐ |
 | 11 | 표·그림 감지 — 표제목/그림제목만 추출, 본문 제외 | ✅ |
 | 12 | 수식 제외, paragraph 페이지 단위 구분(bbox 포함) | ✅ |
+| 13 | Chunk 생성 탭 — RAG용 Chunk JSONL 생성 | ✅ |
 
 (참고: 기존 “Phase 7 통합 검증 및 마무리”는 수동 확인으로 생략 가능하여, 고도화 단계인 검수 탭을 Phase 7부터 진행한다.)
 
@@ -604,7 +605,126 @@ Path가 붙은 최종 결과를 JSONL(및 선택 시 CSV)로 저장하고, DB Im
 
 - [x] 수식 제외(들여쓰기 기반) 필터 및 Extract 옵션 연동
 - [x] merge_paragraphs에서 (path, page) 단위 구분 및 페이지별 bbox union
-- [ ] 수동 검증 완료
+- [x] 수동 검증 완료
+
+---
+
+## Phase 13: Chunk 생성 탭 — RAG용 Chunk JSONL 생성
+
+### 목표
+
+원본 JSONL(라인 단위)을 유지하면서, RAG에 바로 넣을 수 있는 **Chunk JSONL(의미 단위)**을 새로 생성한다.
+
+- **Chunk 기준**
+  - **Merge**: `path.article` + `path.paragraph`
+  - **Split**: 목표 600자 / 최대 1000자
+- **출력**: 1줄 = 1chunk (`chunk_index` 포함)
+
+### 작업 내용
+
+#### 1) 입력 데이터 분석 단계
+
+- **해야 할 것**
+  - JSONL 1줄 구조 확정 (필드: `page`, `line_no`, `path`, `text`, `bbox`)
+  - `path`의 실제 값 분포 확인
+  - `article`이 없는 줄이 있는지?
+  - `paragraph`가 `None`인 경우가 있는지?
+  - `chapter`/`section`이 중간에 비는지?
+- **결과물**
+  - **“Merge Key 생성 규칙”** 확정 (예: article 없으면 `chapter`+`section`으로 fallback)
+
+#### 2) Merge 규칙 설계 (라인 → 그룹)
+
+- **해야 할 것**
+  - 각 line을 아래 key로 그룹핑
+    - **기본 merge key**: `doc_id`, `path.article`, `path.paragraph`
+  - **예외 처리(중요)**
+    - article/paragraph가 비어 있는 줄 처리 (제목·머리말·부칙·목차 등)
+    - 같은 article인데 paragraph가 없는 경우 → paragraph를 `"0"` 같은 값으로 통일할지 결정
+- **결과물**
+  - **“그룹 단위 텍스트”** 리스트 생성
+
+#### 3) 그룹 텍스트 정제 단계
+
+- **해야 할 것**
+  - 줄 합치기 규칙: `text`를 공백으로 합칠지, 줄바꿈 `\n` 유지할지
+  - 불필요한 공백 제거
+  - 페이지 머리말/꼬리말 같은 노이즈 제거 가능성 체크
+- **결과물**
+  - 그룹별 **clean_text** 생성
+
+#### 4) Chunk Split 규칙 설계 (600/1000)
+
+- **해야 할 것**
+  - 그룹 텍스트가 너무 길면 분할
+  - **권장 룰**
+    - `target_len = 600`, `max_len = 1000`
+    - split 우선순위: `\n` 기준 → 문장 종결(다. / . 등) 기준 → 그래도 안 되면 하드 컷(문자수)
+- **결과물**
+  - 그룹 1개 → chunk 여러 개 생성
+
+#### 5) Chunk JSONL 스키마 설계
+
+- **추천 스키마(최소 필드)**
+  - `doc_id`, `article`, `paragraph`, `chunk_index`, `text`, `meta`
+  - `meta`: `pages`(start/end 또는 list), `line_no` range, chapter/section 정보
+- **결과물**
+  - **chunk JSONL 구조** 확정
+
+#### 6) 출력 생성 + 검증
+
+- **해야 할 것**
+  - chunk JSONL 파일 생성
+  - **검증 로직**
+    - chunk text가 비어 있지 않은지
+    - chunk 길이가 max를 넘지 않는지
+    - article/paragraph별 `chunk_index`가 1부터 잘 올라가는지
+    - 원본 대비 텍스트 누락이 없는지(가능하면)
+- **결과물**
+  - Chunk JSONL 생성 완료
+  - 검증 리포트(간단 로그)
+
+#### 7) 샘플 테스트 (RAG 투입 직전)
+
+- **해야 할 것**
+  - 임베딩 10개 정도만 샘플로 만들어 검색이 잘 되는지 확인
+  - 예: “제10조 검사 주기”, “안전장치 요구사항”, “정기검사 실시 조건”
+- **결과물**
+  - chunk 품질 확인
+  - chunk size 조정 필요 여부 판단
+
+### 최종 산출물
+
+| 산출물 | 설명 |
+|--------|------|
+| 원본 JSONL | 유지 |
+| Chunk JSONL | RAG 입력용 |
+| chunk 생성 코드 | Chunk 생성 탭/모듈 |
+| 검증 로그/리포트 | 검증 결과 요약 |
+
+### Phase 13에서 다루는 소스
+
+| 파일 | 내용 |
+|------|------|
+| `src/ui/tabs/tab_chunk.py` (신규) | Chunk 생성 탭 UI |
+| `src/core/chunk_builder.py` (신규) | Merge/Split/스키마 로직 |
+| `src/core/chunk_validate.py` (신규) | 검증 로직 |
+
+### 수동 검증 방법
+
+1. 원본 JSONL 로드 후 Chunk 생성 실행 → Chunk JSONL 파일 생성 확인
+2. 검증 로그에서 길이·chunk_index·누락 여부 확인
+3. 샘플 쿼리로 RAG 검색 품질 확인
+
+### 진도 체크
+
+- [x] 입력 데이터 분석 및 Merge Key 규칙 확정
+- [x] Merge 규칙 설계 및 그룹 단위 텍스트 생성
+- [x] 그룹 텍스트 정제 및 clean_text 생성
+- [x] Chunk Split 규칙(600/1000) 적용
+- [x] Chunk JSONL 스키마 확정 및 출력 생성
+- [x] 검증 로직 및 리포트 구현
+- [x] 샘플 RAG 테스트 및 chunk 품질 확인
 
 ---
 
@@ -624,5 +744,6 @@ Path가 붙은 최종 결과를 JSONL(및 선택 시 CSV)로 저장하고, DB Im
 | 10 | `src/ui/tabs/tab_review.py` | phase.md Phase 10 |
 | 11 | `table_figure_rules.py`, `table_figure_filter.py`, `extract_pymupdf.py`, `tab_extract.py` | phase.md Phase 11 |
 | 12 | `equation_filter.py`, `export_jsonl.py`(merge_paragraphs), `tab_extract.py` | phase.md Phase 12 |
+| 13 | `tab_chunk.py`, `chunk_builder.py`, `chunk_validate.py` | phase.md Phase 13 |
 
 매 Phase는 위 표에 해당하는 파일만 열어 작업하면 토큰 사용을 최소화할 수 있다.

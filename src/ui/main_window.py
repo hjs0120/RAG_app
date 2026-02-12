@@ -15,6 +15,7 @@ from src.ui.tabs.tab_extract import TabExtract
 from src.ui.tabs.tab_parse import TabParse
 from src.ui.tabs.tab_export import TabExport
 from src.ui.tabs.tab_review import TabReview
+from src.ui.tabs.tab_chunk import TabChunk
 
 
 def _default_output_dir() -> str:
@@ -24,7 +25,7 @@ def _default_output_dir() -> str:
 
 
 class MainWindow(QMainWindow):
-    """메인 윈도우 — 5개 탭(Import, Extract, Parse, Export, 검수)."""
+    """메인 윈도우 — 6개 탭(Import, Extract, Parse, Export, 검수, Chunk)."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -53,4 +54,5 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(TabParse(self.app_state), "Parse")
         self.tabs.addTab(TabExport(self.app_state), "Export")
         self.tabs.addTab(TabReview(), "검수")
+        self.tabs.addTab(TabChunk(self.app_state), "Chunk")
         layout.addWidget(self.tabs)
