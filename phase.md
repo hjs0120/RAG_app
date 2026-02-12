@@ -31,6 +31,8 @@
 | 11 | 표·그림 감지 — 표제목/그림제목만 추출, 본문 제외 | ✅ |
 | 12 | 수식 제외, paragraph 페이지 단위 구분(bbox 포함) | ✅ |
 | 13 | Chunk 생성 탭 — RAG용 Chunk JSONL 생성 | ✅ |
+| 14 | 임베딩 탭 — JSONL 임베딩, FAISS 저장, 테스트 | ☐ |
+| 15 | RAG 탭 — 질문 입력 및 RAG 답변 | ☐ |
 
 (참고: 기존 “Phase 7 통합 검증 및 마무리”는 수동 확인으로 생략 가능하여, 고도화 단계인 검수 탭을 Phase 7부터 진행한다.)
 
@@ -728,6 +730,197 @@ Path가 붙은 최종 결과를 JSONL(및 선택 시 CSV)로 저장하고, DB Im
 
 ---
 
+## Phase 14: 임베딩 탭 — JSONL 임베딩, FAISS 저장, 테스트
+
+### 목표
+
+goal_v2.md 기반으로 **임베딩 탭**을 만들고, chunk JSONL을 bge-m3로 임베딩하고 FAISS 인덱스로 저장하며, 검색 테스트를 수행할 수 있게 한다.
+
+### 작업 내용
+
+#### 1) 임베딩 탭 UI
+
+- **탭 추가**: 메인 윈도우에 "임베딩" 탭 추가 (`tab_embedding.py`)
+- **입력**
+  - Chunk JSONL 파일 선택 (Phase 13에서 생성한 `*_chunks.jsonl`)
+  - 출력 디렉터리 지정 (기본: `output/` 또는 `index/`)
+- **실행 버튼**
+  - "임베딩 & FAISS 저장" — JSONL 로드 → 임베딩 생성 → FAISS 저장 일괄 실행
+  - 진행률 표시 (chunk 수 기준)
+
+#### 2) JSONL 임베딩 기능
+
+- **해야 할 것**
+  - chunk.jsonl 로드 (1줄 = 1chunk, `chunk_id`, `text`, `meta` 포함)
+  - `text`를 리스트로 모아 batch 처리
+  - **bge-m3** 모델로 embeddings 생성
+  - **normalize** (중요: FAISS IndexFlatIP는 cosine 유사도와 동일)
+- **산출물**: embeddings (N x D) float32
+- **모듈**: `src/core/embedding_bge.py` — bge-m3 로드, batch encode, normalize
+
+#### 3) FAISS 인덱스 생성 및 저장
+
+- **해야 할 것**
+  - FAISS `IndexFlatIP` 생성 (코사인 유사도용)
+  - embeddings를 `index.add()`로 추가
+  - 인덱스를 `rules.index`로 저장
+- **산출물**: `rules.index` (또는 사용자 지정 경로)
+- **모듈**: `src/core/faiss_index.py` — 인덱스 생성, 저장, 로드
+
+#### 4) 메타데이터 저장
+
+- **해야 할 것**
+  - FAISS는 "0,1,2,…" 순서만 기억하므로, 인덱스 순서대로 메타 저장
+  - `meta_list[i]` = i번째 벡터에 해당하는 chunk 정보 (chunk_id, text, meta)
+- **산출물**: `rules_meta.jsonl` (또는 `*_meta.jsonl`)
+- **형식**: 인덱스 i와 동일 순서로 한 줄씩 chunk 메타 JSON
+
+#### 5) 테스트 기능
+
+- **탭 내 "테스트" 영역**
+  - 테스트 쿼리 입력 (예: "제10조 검사 주기", "안전장치 요구사항")
+  - "검색 테스트" 버튼 → query 임베딩(bge-m3) → normalize → FAISS top-k 검색
+  - 결과 표시: 상위 k개 chunk_id, text 미리보기, 유사도 점수
+- **검증**: top-k 결과가 의미적으로 관련 있는지 수동 확인
+
+### 파라미터 (goal_v2.md 기준)
+
+| 항목 | 값 |
+|------|-----|
+| embedding model | bge-m3 |
+| index type | IndexFlatIP (normalize 시 cosine과 동일) |
+| top_k | 5~8 |
+| chunk target | 600자 |
+
+### Phase 14에서 다루는 소스
+
+| 파일 | 내용 |
+|------|------|
+| `src/ui/main_window.py` | 임베딩 탭 추가 |
+| `src/ui/tabs/tab_embedding.py` (신규) | 임베딩 탭 UI: JSONL 선택, 실행, 테스트 |
+| `src/core/embedding_bge.py` (신규) | bge-m3 임베딩, batch encode, normalize |
+| `src/core/faiss_index.py` (신규) | FAISS 인덱스 생성/저장/로드, 메타 연동 |
+
+### requirements.txt 추가
+
+```
+sentence-transformers>=2.2.0   # bge-m3
+faiss-cpu>=1.7.0              # 또는 faiss-gpu
+```
+
+### 수동 검증 방법
+
+1. Chunk JSONL 선택 후 "임베딩 & FAISS 저장" 실행 → `rules.index`, `rules_meta.jsonl` 생성 확인
+2. 테스트 영역에 "제10조 검사 주기" 입력 후 검색 → 관련 chunk가 상위에 나오는지 확인
+3. `rules_meta.jsonl` 1줄 = FAISS 인덱스 1개와 대응하는지 확인
+
+### 진도 체크
+
+- [ ] 임베딩 탭 UI (JSONL 선택, 출력 경로, 실행 버튼)
+- [ ] embedding_bge.py: bge-m3 로드, batch encode, normalize
+- [ ] faiss_index.py: IndexFlatIP 생성, 저장, 로드
+- [ ] 메타데이터(rules_meta.jsonl) 저장 및 순서 연동
+- [ ] 테스트 기능: 쿼리 입력 → top-k 검색 결과 표시
+- [ ] 수동 검증 완료
+
+---
+
+## Phase 15: RAG 탭 — 질문 입력 및 RAG 답변
+
+### 목표
+
+**RAG 탭**을 만들고, 사용자가 질문을 입력하면 FAISS로 관련 chunk를 검색한 뒤 LLM(qwen2.5-coder:7b)으로 근거 기반 답변을 생성해 표시한다.
+
+### 작업 내용
+
+#### 1) RAG 탭 UI
+
+- **탭 추가**: 메인 윈도우에 "RAG" 탭 추가 (`tab_rag.py`)
+- **입력**
+  - FAISS 인덱스 경로 (`rules.index`) — 또는 기본 경로 자동 탐지
+  - 메타데이터 경로 (`rules_meta.jsonl`)
+  - 질문 입력란 (`QPlainTextEdit` 또는 `QLineEdit`)
+- **실행**
+  - "질문하기" 버튼 — RAG 파이프라인 실행
+  - 응답 대기 시 로딩/진행 표시
+- **출력**
+  - 답변 영역 (읽기 전용 `QTextEdit`)
+  - (선택) 사용된 chunk 근거 목록 표시 (출처)
+
+#### 2) 검색 함수 구현
+
+- **해야 할 것**
+  - query 입력 받기
+  - query 임베딩(bge-m3) → normalize
+  - `faiss.search(top_k)` 실행
+  - 결과 index → meta_list로 변환
+  - chunk text 반환
+- **모듈**: `faiss_index.py`의 `search(query, top_k)` 또는 `rag_search.py`
+
+#### 3) LLM 조합 (RAG 답변 생성)
+
+- **해야 할 것**
+  - 검색된 chunk top-k를 context로 묶기
+  - "근거 기반 답변" 프롬프트 구성
+  - **ollama qwen2.5-coder:7b** 호출
+  - 답변 출력
+- **파라미터**: temperature 0.2~0.4
+- **모듈**: `src/core/rag_llm.py` — context 구성, ollama API 호출
+- **ollama 전제**: 로컬에 `ollama run qwen2.5-coder:7b` 실행 중이어야 함
+
+#### 4) 프롬프트 설계
+
+- **형식 예시**
+  ```
+  다음 규격문서 chunk를 근거로 질문에 답해주세요.
+  
+  [참고 chunk]
+  ---
+  {chunk_1}
+  ---
+  {chunk_2}
+  ...
+  
+  질문: {query}
+  
+  답변:
+  ```
+
+### Phase 15에서 다루는 소스
+
+| 파일 | 내용 |
+|------|------|
+| `src/ui/main_window.py` | RAG 탭 추가 |
+| `src/ui/tabs/tab_rag.py` (신규) | RAG 탭 UI: 인덱스 경로, 질문, 답변 표시 |
+| `src/core/rag_search.py` (신규) | query → embedding → FAISS search → chunk 반환 |
+| `src/core/rag_llm.py` (신규) | context 구성, ollama qwen2.5-coder:7b 호출 |
+| `src/core/faiss_index.py` | search 함수 (Phase 14에서 확장) |
+| `src/core/embedding_bge.py` | query 임베딩 재사용 |
+
+### requirements.txt 추가
+
+```
+ollama  # 또는 requests로 ollama HTTP API 직접 호출
+```
+
+### 수동 검증 방법
+
+1. Phase 14 완료 후 `rules.index`, `rules_meta.jsonl` 존재 확인
+2. ollama에서 `qwen2.5-coder:7b` 모델 실행 중인지 확인
+3. RAG 탭에서 "제10조 검사 주기는 어떻게 되어 있나요?" 질문 → 근거가 포함된 답변이 나오는지 확인
+4. 답변이 chunk 내용을 참조하는지, 환각이 심하지 않은지 확인
+
+### 진도 체크
+
+- [ ] RAG 탭 UI (인덱스 경로, 질문 입력, 답변 표시)
+- [ ] rag_search.py: query → embedding → FAISS top-k → chunk 반환
+- [ ] rag_llm.py: context 구성, ollama qwen2.5-coder:7b 호출
+- [ ] 프롬프트 설계 및 근거 기반 답변 형식
+- [ ] (선택) 사용된 chunk 출처 표시
+- [ ] 수동 검증 완료
+
+---
+
 ## 토큰 최소화 가이드
 
 | Phase | 집중할 디렉터리/파일 | 참고 문서 |
@@ -745,5 +938,7 @@ Path가 붙은 최종 결과를 JSONL(및 선택 시 CSV)로 저장하고, DB Im
 | 11 | `table_figure_rules.py`, `table_figure_filter.py`, `extract_pymupdf.py`, `tab_extract.py` | phase.md Phase 11 |
 | 12 | `equation_filter.py`, `export_jsonl.py`(merge_paragraphs), `tab_extract.py` | phase.md Phase 12 |
 | 13 | `tab_chunk.py`, `chunk_builder.py`, `chunk_validate.py` | phase.md Phase 13 |
+| 14 | `tab_embedding.py`, `embedding_bge.py`, `faiss_index.py` | phase.md Phase 14, goal_v2.md |
+| 15 | `tab_rag.py`, `rag_search.py`, `rag_llm.py`, `faiss_index.py`, `embedding_bge.py` | phase.md Phase 15, goal_v2.md |
 
 매 Phase는 위 표에 해당하는 파일만 열어 작업하면 토큰 사용을 최소화할 수 있다.
