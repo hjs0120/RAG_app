@@ -62,6 +62,9 @@ def parse_lines(lines: list[dict]) -> list[dict]:
             elif matched.kind == "article":
                 path["article"] = matched.value
                 path["paragraph"] = None
+                # "101. 적용", "101. 하중" 등 절 이름(section) 추출 — Merge key 구분용
+                if getattr(matched, "article_section", None):
+                    path["section"] = matched.article_section
             elif matched.kind == "paragraph":
                 path["paragraph"] = matched.value
 

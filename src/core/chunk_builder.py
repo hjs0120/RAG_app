@@ -9,6 +9,7 @@ from typing import Any
 # 기본값 (Phase 13 명세)
 TARGET_LEN = 600
 MAX_LEN = 1000
+MIN_CHUNK_LEN = 30  # Phase 16: 너무 짧은 chunk 방지
 
 
 def _norm(v: Any) -> str:
@@ -19,31 +20,39 @@ def _norm(v: Any) -> str:
     return s if s else ""
 
 
-def merge_key(record: dict) -> tuple[str, str, str]:
+def merge_key(record: dict) -> tuple[str, str, str, str]:
     """
-    그룹핑용 Merge Key 생성.
+    그룹핑용 Merge Key 생성. (Phase 16: section 포함)
     - doc_id
     - article (없으면 chapter+section, 둘 다 없으면 "_")
+    - section (101.적용 vs 101.하중 구분, 없으면 chapter_section 또는 "_")
     - paragraph (없으면 "0")
     """
     doc_id = _norm(record.get("doc_id")) or "_"
     path = record.get("path") or {}
     article = _norm(path.get("article"))
+    section = _norm(path.get("section"))
     paragraph = _norm(path.get("paragraph"))
     if not article:
         ch = _norm(path.get("chapter"))
         sec = _norm(path.get("section"))
         article = f"{ch}_{sec}" if (ch or sec) else "_"
+    if not section and article != "_":
+        # section 없으면 chapter 등으로 fallback
+        ch = _norm(path.get("chapter"))
+        section = ch if ch else "_"
+    if not section:
+        section = "_"
     if not paragraph:
         paragraph = "0"
-    return (doc_id, article, paragraph)
+    return (doc_id, article, section, paragraph)
 
 
-def group_by_merge_key(records: list[dict]) -> list[tuple[tuple[str, str, str], list[dict]]]:
+def group_by_merge_key(records: list[dict]) -> list[tuple[tuple[str, str, str, str], list[dict]]]:
     """
     각 레코드를 merge key로 그룹핑.
     Returns:
-        [( (doc_id, article, paragraph), [line1, line2, ...] ), ...]
+        [( (doc_id, article, section, paragraph), [line1, line2, ...] ), ...]
     """
     from itertools import groupby
     sorted_records = sorted(records, key=merge_key)
@@ -186,31 +195,56 @@ def build_chunks(
     *,
     target_len: int = TARGET_LEN,
     max_len: int = MAX_LEN,
+    min_chunk_len: int = MIN_CHUNK_LEN,
 ) -> list[dict]:
     """
     원본 JSONL 레코드 리스트에서 RAG용 Chunk 리스트 생성.
-    - Merge: path.article + path.paragraph
-    - 그룹 텍스트 정제 후 Split (target_len / max_len)
-    - 스키마: doc_id, article, paragraph, chunk_index, text, meta
+    - Merge key: (doc_id, article, section, paragraph) — Phase 16
+    - paragraph "0" 그룹: merge 없이 한 줄 = 한 chunk (라인별 분리)
+    - min_chunk_len 미만: 이전/다음과 합치거나 건너뜀(제외)
+    - 스키마: doc_id, article, section, paragraph, chunk_index, text, meta
     """
     chunks_out: list[dict] = []
     grouped = group_by_merge_key(records)
 
-    for (doc_id, article, paragraph), lines in grouped:
+    for (doc_id, article, section, paragraph), lines in grouped:
+        # paragraph "0" 그룹: merge 하지 않고 라인별 chunk
+        if paragraph == "0":
+            path = (lines[0].get("path") or {}) if lines else {}
+            for idx, ln in enumerate(lines, start=1):
+                text = (ln.get("text") or "").strip()
+                if not text:
+                    continue
+                if min_chunk_len > 0 and len(text) < min_chunk_len:
+                    continue  # 너무 짧은 제목만 chunk 제외
+                meta = build_chunk_meta([ln], path)
+                chunks_out.append({
+                    "doc_id": doc_id,
+                    "article": article,
+                    "section": section,
+                    "paragraph": paragraph,
+                    "chunk_index": idx,
+                    "text": text,
+                    "meta": meta,
+                })
+            continue
+
         clean_text = clean_group_text(lines)
         if not clean_text:
             continue
         path = (lines[0].get("path") or {}) if lines else {}
         text_parts = split_into_chunks(clean_text, target_len=target_len, max_len=max_len)
         for idx, part in enumerate(text_parts, start=1):
-            # 이 chunk에 해당하는 라인은 전체 그룹과 동일(단순화). 실제로는 split 구간별로 나눌 수 있음.
+            if min_chunk_len > 0 and len(part.strip()) < min_chunk_len:
+                continue  # 너무 짧은 chunk 제외
             meta = build_chunk_meta(lines, path)
             chunks_out.append({
                 "doc_id": doc_id,
                 "article": article,
+                "section": section,
                 "paragraph": paragraph,
                 "chunk_index": idx,
-                "text": part,
+                "text": part.strip(),
                 "meta": meta,
             })
     return chunks_out

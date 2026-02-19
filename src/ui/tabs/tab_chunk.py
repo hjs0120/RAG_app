@@ -23,6 +23,7 @@ from src.core.chunk_builder import (
     write_chunk_jsonl,
     TARGET_LEN,
     MAX_LEN,
+    MIN_CHUNK_LEN,
 )
 from src.core.chunk_validate import validate_chunks, validate_chunk_text_coverage
 
@@ -72,6 +73,13 @@ class TabChunk(QWidget):
         self._spin_max.setValue(MAX_LEN)
         self._spin_max.setSuffix(" 자")
         opts_layout.addWidget(self._spin_max)
+        opts_layout.addWidget(QLabel("최소 길이:"))
+        self._spin_min = QSpinBox()
+        self._spin_min.setRange(0, 200)
+        self._spin_min.setValue(MIN_CHUNK_LEN)
+        self._spin_min.setSuffix(" 자")
+        self._spin_min.setToolTip("이 길이 미만 chunk는 제외 (0이면 제한 없음)")
+        opts_layout.addWidget(self._spin_min)
         opts_layout.addStretch()
         layout.addWidget(group_opts)
 
@@ -163,11 +171,17 @@ class TabChunk(QWidget):
 
         target_len = self._spin_target.value()
         max_len = self._spin_max.value()
+        min_chunk_len = self._spin_min.value()
         if max_len < target_len:
             max_len = target_len
 
         try:
-            chunks = build_chunks(records, target_len=target_len, max_len=max_len)
+            chunks = build_chunks(
+                records,
+                target_len=target_len,
+                max_len=max_len,
+                min_chunk_len=min_chunk_len if min_chunk_len > 0 else 0,
+            )
         except Exception as e:
             self._label_status.setText(f"Chunk 생성 실패: {e}")
             self._log.setPlainText(f"오류:\n{e}")

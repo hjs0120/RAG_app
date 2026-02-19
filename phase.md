@@ -31,8 +31,12 @@
 | 11 | 표·그림 감지 — 표제목/그림제목만 추출, 본문 제외 | ✅ |
 | 12 | 수식 제외, paragraph 페이지 단위 구분(bbox 포함) | ✅ |
 | 13 | Chunk 생성 탭 — RAG용 Chunk JSONL 생성 | ✅ |
-| 14 | 임베딩 탭 — JSONL 임베딩, FAISS 저장, 테스트 | ☐ |
-| 15 | RAG 탭 — 질문 입력 및 RAG 답변 | ☐ |
+| 14 | 임베딩 탭 — JSONL 임베딩, FAISS 저장, 테스트 | ✅ |
+| 15 | bge-m3 로컬·GPU 전환 | ✅ |
+| 16 | Chunk 품질 개선 — paragraph "0" 분리, section·Merge key 수정 | ✅ |
+| 17 | RAG 파이프라인 — Ollama 연동, Chunk 재조합, 출처 강제 | ☐ |
+| 18 | RAG 탭 UI — 질문/검색/답변, Top-k 디버깅, 비동기 처리 | ☐ |
+| 19 | RAG 문서화 및 테스트 — docs, 테스트 시나리오, 체크리스트 | ☐ |
 
 (참고: 기존 “Phase 7 통합 검증 및 마무리”는 수동 확인으로 생략 가능하여, 고도화 단계인 검수 탭을 Phase 7부터 진행한다.)
 
@@ -816,108 +820,379 @@ faiss-cpu>=1.7.0              # 또는 faiss-gpu
 
 ### 진도 체크
 
-- [ ] 임베딩 탭 UI (JSONL 선택, 출력 경로, 실행 버튼)
-- [ ] embedding_bge.py: bge-m3 로드, batch encode, normalize
-- [ ] faiss_index.py: IndexFlatIP 생성, 저장, 로드
-- [ ] 메타데이터(rules_meta.jsonl) 저장 및 순서 연동
-- [ ] 테스트 기능: 쿼리 입력 → top-k 검색 결과 표시
-- [ ] 수동 검증 완료
+- [x] 임베딩 탭 UI (JSONL 선택, 출력 경로, 실행 버튼)
+- [x] embedding_bge.py: bge-m3 로드, batch encode, normalize
+- [x] faiss_index.py: IndexFlatIP 생성, 저장, 로드
+- [x] 메타데이터(rules_meta.jsonl) 저장 및 순서 연동
+- [x] 테스트 기능: 쿼리 입력 → top-k 검색 결과 표시
+- [x] 수동 검증 완료
 
 ---
 
-## Phase 15: RAG 탭 — 질문 입력 및 RAG 답변
+## Phase 15: bge-m3 로컬·GPU 전환
 
 ### 목표
 
-**RAG 탭**을 만들고, 사용자가 질문을 입력하면 FAISS로 관련 chunk를 검색한 뒤 LLM(qwen2.5-coder:7b)으로 근거 기반 답변을 생성해 표시한다.
+HuggingFace Hub에서 실행 시마다 요청/다운로드하는 구조를 제거하고, 모델을 로컬에 미리 다운로드하여 오프라인에서만 로딩한다. SentenceTransformer(bge-m3) 임베딩을 GPU(CUDA)로 수행하고, conda 가상환경(pyside6)에서 정상 실행되도록 구성한다.
 
 ### 작업 내용
 
-#### 1) RAG 탭 UI
+#### 0) 폴더 구조 통일
 
-- **탭 추가**: 메인 윈도우에 "RAG" 탭 추가 (`tab_rag.py`)
-- **입력**
-  - FAISS 인덱스 경로 (`rules.index`) — 또는 기본 경로 자동 탐지
-  - 메타데이터 경로 (`rules_meta.jsonl`)
-  - 질문 입력란 (`QPlainTextEdit` 또는 `QLineEdit`)
-- **실행**
-  - "질문하기" 버튼 — RAG 파이프라인 실행
-  - 응답 대기 시 로딩/진행 표시
-- **출력**
-  - 답변 영역 (읽기 전용 `QTextEdit`)
-  - (선택) 사용된 chunk 근거 목록 표시 (출처)
+프로젝트 루트(app.py 상위)에 다음 구조로 고정:
 
-#### 2) 검색 함수 구현
+```
+RAG_app/
+  models/
+    bge-m3/
+      (huggingface snapshot files)
+  src/
+    app.py
+  requirements.txt
+```
 
-- **해야 할 것**
-  - query 입력 받기
-  - query 임베딩(bge-m3) → normalize
-  - `faiss.search(top_k)` 실행
-  - 결과 index → meta_list로 변환
-  - chunk text 반환
-- **모듈**: `faiss_index.py`의 `search(query, top_k)` 또는 `rag_search.py`
+- `models/bge-m3/` 폴더는 git에 올리지 않고 `.gitignore`에 추가한다.
 
-#### 3) LLM 조합 (RAG 답변 생성)
+#### 1) 모델 미리 다운로드 스크립트
 
-- **해야 할 것**
-  - 검색된 chunk top-k를 context로 묶기
-  - "근거 기반 답변" 프롬프트 구성
-  - **ollama qwen2.5-coder:7b** 호출
-  - 답변 출력
-- **파라미터**: temperature 0.2~0.4
-- **모듈**: `src/core/rag_llm.py` — context 구성, ollama API 호출
-- **ollama 전제**: 로컬에 `ollama run qwen2.5-coder:7b` 실행 중이어야 함
+- **스크립트 추가**: `scripts/download_bge_m3.py` 또는 프로젝트 루트의 `download_model.py`
+- HuggingFace Hub에서 `BAAI/bge-m3`를 `models/bge-m3/`로 저장
+- `huggingface_hub`의 `snapshot_download` 또는 `sentence-transformers`로 저장
 
-#### 4) 프롬프트 설계
+#### 2) app에서 로컬 경로로 로딩
 
-- **형식 예시**
-  ```
-  다음 규격문서 chunk를 근거로 질문에 답해주세요.
-  
-  [참고 chunk]
-  ---
-  {chunk_1}
-  ---
-  {chunk_2}
-  ...
-  
-  질문: {query}
-  
-  답변:
-  ```
+- `embedding_bge.py`: HuggingFace ID(`BAAI/bge-m3`) 대신 **로컬 경로** 사용
+- app.py 기준 상위 폴더의 `models/bge-m3/`를 기본 경로로 사용
+
+#### 3) GPU(CUDA) 모드 적용
+
+- 임베딩 모델 생성 시 `device` 지정 (예: `cuda` 또는 `device="cuda"`)
+- PyTorch CUDA 사용 전제
+
+#### 4) PyTorch CUDA 설치 (conda 환경)
+
+- conda 환경(pyside6)에서 정상 동작하도록 설정
+- **권장**: pip 방식으로 torch, torchvision, torchaudio를 CUDA 빌드로 설치
+- torch CUDA 빌드는 requirements.txt에 완전히 고정하기 어려우므로, 설치 커맨드를 별도 문서화하여 안내
+
+#### 5) requirements.txt 갱신
+
+- conda 가상환경(pyside6)에서 `pip install -r requirements.txt` 후 정상 실행되도록 의존성 정리
+- torch CUDA 설치는 문서화된 별도 커맨드로 안내
+
+#### 6) HF_TOKEN 경고 제거
+
+- HuggingFace Hub 접근 시 `HF_TOKEN` 관련 경고가 나오지 않도록, 로컬 모델만 사용하는 구조로 변경하여 제거
+
+#### 7) (선택) faiss-gpu 전환
+
+- 임베딩을 GPU로 수행할 경우, FAISS 검색도 GPU 가속 가능
+- `faiss-cpu` 대신 `faiss-gpu` 설치 시 `IndexFlatIP`를 GPU로 이전하여 검색 속도 향상 가능
+- CUDA 환경이 있는 경우 고려
 
 ### Phase 15에서 다루는 소스
 
 | 파일 | 내용 |
 |------|------|
-| `src/ui/main_window.py` | RAG 탭 추가 |
-| `src/ui/tabs/tab_rag.py` (신규) | RAG 탭 UI: 인덱스 경로, 질문, 답변 표시 |
-| `src/core/rag_search.py` (신규) | query → embedding → FAISS search → chunk 반환 |
-| `src/core/rag_llm.py` (신규) | context 구성, ollama qwen2.5-coder:7b 호출 |
-| `src/core/faiss_index.py` | search 함수 (Phase 14에서 확장) |
-| `src/core/embedding_bge.py` | query 임베딩 재사용 |
-
-### requirements.txt 추가
-
-```
-ollama  # 또는 requests로 ollama HTTP API 직접 호출
-```
+| `src/core/embedding_bge.py` | 로컬 경로 로딩, device="cuda" 지정 |
+| `scripts/download_bge_m3.py` (신규) 또는 `download_model.py` | 모델 미리 다운로드 스크립트 |
+| `requirements.txt` | 의존성 갱신, torch CUDA 설치 안내 문서 참조 |
+| `.gitignore` | `models/bge-m3/` 추가 |
+| `README.md` 또는 `docs/setup.md` | torch CUDA 설치 커맨드 문서화 |
 
 ### 수동 검증 방법
 
-1. Phase 14 완료 후 `rules.index`, `rules_meta.jsonl` 존재 확인
-2. ollama에서 `qwen2.5-coder:7b` 모델 실행 중인지 확인
-3. RAG 탭에서 "제10조 검사 주기는 어떻게 되어 있나요?" 질문 → 근거가 포함된 답변이 나오는지 확인
-4. 답변이 chunk 내용을 참조하는지, 환각이 심하지 않은지 확인
+1. `scripts/download_bge_m3.py` 실행 → `models/bge-m3/`에 모델 파일 생성 확인
+2. 네트워크 연결 없이 앱 실행 → 임베딩 탭에서 로컬 모델 로딩 확인
+3. GPU 사용 여부 확인 (nvidia-smi 또는 PyTorch `torch.cuda.is_available()`)
+4. conda(pyside6) 환경에서 `pip install -r requirements.txt` 후 정상 실행 확인
 
 ### 진도 체크
 
-- [ ] RAG 탭 UI (인덱스 경로, 질문 입력, 답변 표시)
-- [ ] rag_search.py: query → embedding → FAISS top-k → chunk 반환
-- [ ] rag_llm.py: context 구성, ollama qwen2.5-coder:7b 호출
-- [ ] 프롬프트 설계 및 근거 기반 답변 형식
-- [ ] (선택) 사용된 chunk 출처 표시
+- [x] `models/bge-m3/` 폴더 구조 및 .gitignore 추가
+- [x] 모델 미리 다운로드 스크립트 추가
+- [x] embedding_bge.py: 로컬 경로 로딩, device="cuda"
+- [x] requirements.txt 갱신, torch CUDA 설치 커맨드 문서화
+- [x] HF_TOKEN 경고 제거 확인
+- [x] (선택) faiss-gpu 전환
+- [x] 수동 검증 완료
+
+---
+
+## Phase 16: Chunk 품질 개선 — paragraph "0" 분리, section·Merge key 수정
+
+### 목표
+
+docs/chunk_diagnosis.md 기준으로 **Chunk 품질**을 개선한다. paragraph "0" 그룹에서 서로 다른 조문이 혼합되는 문제를 해결하고, Merge key에 section을 포함하여 101.적용·101.하중 등 같은 article 내 다른 절을 구분한다.
+
+### 작업 내용
+
+#### 1) 원본 파싱 — section(절 이름) 추출
+
+- **해야 할 것**
+  - "101. 적용", "101. 일반", "101. 하중" 등에서 **절 이름(section)**을 추출
+  - `path.section`에 저장 (현재 null인 부분 채우기)
+  - 원본 JSONL export 시 path.section 포함
+- **결과물**
+  - 원본 JSONL의 path에 section 값 반영
+- **참고**: extract/parse 단계(Phase 5 등)에서 text 패턴으로 "101. xxx"의 "xxx" 추출 가능
+
+#### 2) Merge key 수정 — section 포함
+
+- **해야 할 것**
+  - 기존 Merge key: `(doc_id, article, paragraph)`
+  - 변경 Merge key: `(doc_id, article, section, paragraph)`
+  - section이 없으면 fallback: `chapter_section` 또는 `"_"`
+- **결과물**
+  - chunk_builder.py의 `merge_key`, `group_by_merge_key` 수정
+  - 101.적용의 (1)과 101.하중의 (1)이 서로 다른 그룹으로 분리됨
+
+#### 3) paragraph "0" 그룹 처리
+
+- **해야 할 것**
+  - paragraph "0"인 그룹(제목·머리말 등): **merge하지 않음**
+  - 한 줄 = 한 chunk로 처리 (라인별 분리)
+  - 또는 paragraph "0" 그룹 자체를 Chunk JSONL에서 제외 (옵션)
+- **결과물**
+  - "10. 과도한 부식", "10. 펌프의 압력", "10. 시험 보기", "10. 하중시험"이 한 chunk에 섞이지 않음
+
+#### 4) 최소 길이 처리
+
+- **해야 할 것**
+  - 너무 짧은 chunk(예: 20자 미만): 이전/다음 문단과 합치거나 건너뜀
+  - 최소 문자 수 옵션 추가 (예: `min_chunk_len = 30`)
+- **결과물**
+  - "(1) 공장시험", "1001. 일반" 같은 7~8자 제목만의 chunk 방지
+
+### Phase 16에서 다루는 소스
+
+| 파일 | 내용 |
+|------|------|
+| `src/core/rules.py` 또는 parse/extract 모듈 | section(절 이름) 추출, path에 반영 |
+| `src/core/chunk_builder.py` | Merge key에 section 포함, paragraph "0" 분리, min_chunk_len |
+| `src/core/chunk_validate.py` | 검증 로직 조정 |
+| `src/core/export_jsonl.py` | path.section export (필요 시) |
+| `docs/chunk_diagnosis.md` | 진단 기준 문서 |
+
+### 수동 검증 방법
+
+1. 원본 JSONL 재생성 후 path.section 값 존재 확인
+2. Chunk 재생성 → paragraph "0" 그룹이 라인별로 분리되었는지 확인
+3. "제10조 검사 주기" 등 샘플 쿼리로 FAISS 검색 → 관련 chunk만 상위에 나오는지 확인
+4. chunk_diagnosis.md의 예시(chunk 5번, 10번)가 더 이상 발생하지 않는지 확인
+
+### 진도 체크
+
+- [x] 원본 파싱: path.section 추출 및 저장
+- [x] chunk_builder: Merge key에 section 포함
+- [x] paragraph "0" 그룹: merge 없이 라인별 chunk 처리
+- [x] 최소 길이(min_chunk_len) 처리
+- [x] Chunk 재생성 및 FAISS 검색 품질 확인
+- [x] 수동 검증 완료
+
+---
+
+## Phase 17: RAG 파이프라인 — Ollama 연동, Chunk 재조합, 출처 강제
+
+### 목표
+
+Phase 16까지 완료된 RAG_app에 대해 **RAG 핵심 파이프라인**을 구현한다.
+
+- 사용자 질문 입력
+- (옵션) 질문 정제/확장 — 기본은 원문 그대로 사용
+- bge-m3 임베딩 → FAISS 검색
+- 검색된 chunk를 **조문/섹션 단위**로 재조합
+- 로컬 LLM(Ollama)로 답변 생성
+- 답변에 출처를 **강제** 포함
+- 근거 부족 시 거절(threshold)
+
+### 1) LLM 모델 추천 (청크 재조합 + RAG 답변 성능 중심)
+
+| 용도 | 모델 |
+|------|------|
+| 기본 추천 (가장 무난) | `qwen2.5:7b-instruct`, `qwen2.5:14b-instruct` (4070 추천) |
+| 문서 기반 답변/정리 | `llama3.1:8b-instruct` |
+| 회사 3070 | `qwen2.5:7b-instruct` 또는 `llama3.1:8b-instruct` |
+| 집 4070 | `qwen2.5:14b-instruct` |
+
+※ qwen coder 계열은 RAG 답변/요약에 애매하므로 기본 모델로 사용하지 않는다.
+
+### 2) Ollama 연동 방식 (필수)
+
+- **전제**: 로컬에서 Ollama 실행, HTTP API로 호출
+- **기본 주소**: `http://localhost:11434`
+- **호출**: Python `requests`로 `/api/generate` 또는 `/api/chat` 호출
+- **streaming**: 우선 비활성화, 응답 완료 후 UI에 출력
+
+### 3) 파일/모듈 구조
+
+| 신규 파일 | 역할 |
+|----------|------|
+| `src/llm/ollama_client.py` | Ollama API 클라이언트 |
+| `src/rag/rag_pipeline.py` | RAG 파이프라인 오케스트레이션 |
+| `src/rag/prompt_templates.py` | RAG·질문 정제 프롬프트 |
+| `src/rag/chunk_assembler.py` | 조문/섹션 단위 Chunk 재조합 |
+
+### 4) requirements.txt 수정
+
+```
+requests
+# (선택) pydantic
+```
+
+※ torch/transformers는 이미 설치. LLM은 Ollama가 처리하므로 Python에서 torch 필수 아님. bge-m3 임베딩만 GPU 사용.
+
+### 5) 핵심 구현 상세
+
+#### (1) FAISS 검색 결과 → 조문/섹션 단위 재조합
+
+- **그룹핑 키 우선순위**: `article_id` 또는 `article_title` → 없으면 `section_title` → 없으면 `doc_id + page`
+- **정책**:
+  - FAISS top-k=8~12로 넉넉히 검색
+  - 그룹핑 후 그룹별 점수 합산
+  - 상위 그룹 1~2개만 선택
+  - 선택된 그룹에서 chunk 3~6개만 사용
+  - 최종 컨텍스트: 2500~3500 tokens 수준 제한
+
+#### (2) 출처 생성 규칙 (필수)
+
+- chunk meta 기반 출처 목록 생성
+- 포맷: `[1] doc_id=..., page=..., section=..., chunk_id=...`
+- LLM은 제공된 chunk의 출처만 사용, 임의 변경 금지
+
+#### (3) 프롬프트 템플릿 (prompt_templates.py)
+
+- **A. RAG 답변 템플릿**: CONTEXT 밖 정보 사용 금지, 근거 부족 시 "문서에서 근거를 찾지 못했다", 답변 말미에 [출처] 섹션 필수
+- **B. 질문 정제 (옵션)**: 기본 OFF, 검색 품질 낮을 때만 사용
+
+#### (4) 근거 부족 시 거절 (threshold)
+
+- FAISS score가 기준 이하 → "관련 근거를 찾지 못했습니다" 출력, LLM 호출 안 함
+- threshold는 config로 분리
+
+#### (5) ollama_client.py
+
+- `generate(prompt, model, temperature, num_ctx)` → str
+- `health_check()` → bool
+- Ollama 미실행 시 사용자 안내 메시지
+
+#### (6) rag_pipeline.py
+
+- `run_query(question)` → `RAGResult`
+- RAGResult: `question`, `retrieved_chunks`, `assembled_context`, `answer`, `sources`, `debug_info`
+
+### Phase 17에서 다루는 소스
+
+| 파일 | 내용 |
+|------|------|
+| `src/llm/ollama_client.py` (신규) | generate, health_check, 에러 처리 |
+| `src/rag/chunk_assembler.py` (신규) | 조문/섹션 그룹핑, 재조합 |
+| `src/rag/prompt_templates.py` (신규) | RAG 답변·질문 정제 템플릿 |
+| `src/rag/rag_pipeline.py` (신규) | run_query, RAGResult |
+| `src/core/faiss_index.py` | search 확장 |
+| `src/core/embedding_bge.py` | query 임베딩 |
+
+### 진도 체크
+
+- [ ] ollama_client.py: generate, health_check 구현
+- [ ] chunk_assembler.py: 그룹핑·재조합 로직
+- [ ] prompt_templates.py: RAG·질문 정제 템플릿
+- [ ] rag_pipeline.py: run_query, RAGResult
+- [ ] 출처 강제, threshold 적용
 - [ ] 수동 검증 완료
+
+---
+
+## Phase 18: RAG 탭 UI — 질문/검색/답변, Top-k 디버깅, 비동기 처리
+
+### 목표
+
+RAG 파이프라인(Phase 17)을 UI에서 사용하고, **검색 결과 디버깅**과 **UI 프리징 방지**를 구현한다.
+
+### 1) RAG 탭 UI 구성
+
+| 요소 | 설명 |
+|------|------|
+| 질문 입력창 | `QPlainTextEdit` 또는 `QLineEdit` |
+| [검색] 버튼 | FAISS 검색만 실행, top-k 결과 표시 |
+| [답변 생성] 버튼 | 검색 → 재조합 → Ollama 답변 |
+| 검색 결과 리스트 (Top-k) | score, doc_id/page/section/chunk_id, chunk text preview |
+| 답변 출력 영역 | 읽기 전용 `QTextEdit` |
+| 출처 출력 영역 | 답변 아래 별도 표시 |
+
+### 2) UI 프리징 방지
+
+- FAISS 검색·LLM 생성을 **QThread** 또는 **QRunnable**로 실행
+- 상태 표시: "검색중…", "답변 생성중…"
+- 완료 후 UI 업데이트
+
+### 3) 메인 윈도우 연동
+
+- `main_window.py`에 RAG 탭 추가
+- `tab_rag.py` 또는 `rag_tab.py` — 기존 있으면 분리/정리
+
+### Phase 18에서 다루는 소스
+
+| 파일 | 내용 |
+|------|------|
+| `src/ui/main_window.py` | RAG 탭 추가 |
+| `src/ui/tabs/tab_rag.py` (신규) | RAG 탭 UI 전체 |
+| `src/rag/rag_pipeline.py` | UI에서 호출 |
+
+### 진도 체크
+
+- [ ] 질문 입력, [검색], [답변 생성] 버튼
+- [ ] Top-k 검색 결과 리스트 (score, meta, preview)
+- [ ] 답변·출처 출력 영역
+- [ ] QThread/QRunnable로 비동기 처리
+- [ ] 상태 표시 (검색중, 답변 생성중)
+- [ ] 수동 검증 완료
+
+---
+
+## Phase 19: RAG 문서화 및 테스트 — docs, 테스트 시나리오, 체크리스트
+
+### 목표
+
+Phase 17·18 구현 내용을 문서화하고, 테스트 시나리오와 완료 체크리스트를 정리한다.
+
+### 1) docs 작성 (필수)
+
+| 문서 | 내용 |
+|------|------|
+| `docs/ollama_setup.md` | Windows Ollama 설치, 모델 다운로드(`ollama pull qwen2.5:7b-instruct` 등), 실행 확인, API 호출 예시 |
+| `docs/phase17_llm_rag.md` | Phase17 구현 내용, chunk 재조합 규칙, 출처 규칙, UI 구성, 문제 해결 FAQ |
+
+### 2) 테스트 시나리오 (5개)
+
+1. 검색 결과가 충분한 질문
+2. 검색 결과가 부족한 질문
+3. section이 섞여 들어오는 질문
+4. 출처가 제대로 붙는지 확인
+5. Ollama가 꺼져 있을 때 오류 처리 확인
+
+### 3) Phase 17 완료 체크리스트
+
+- docs에 반영
+
+### 4) 커밋 단위 정리
+
+- 실행 가능한 상태로 Phase 17~19 완료 후 커밋 단위 정리
+
+### Phase 19에서 다루는 소스
+
+| 파일 | 내용 |
+|------|------|
+| `docs/ollama_setup.md` (신규) | Ollama 설치·모델·API |
+| `docs/phase17_llm_rag.md` (신규) | 구현 요약·규칙·FAQ |
+
+### 진도 체크
+
+- [ ] docs/ollama_setup.md 작성
+- [ ] docs/phase17_llm_rag.md 작성
+- [ ] 테스트 시나리오 5개 수행
+- [ ] Phase 17 완료 체크리스트 docs 반영
+- [ ] 커밋 단위 정리
 
 ---
 
@@ -939,6 +1214,10 @@ ollama  # 또는 requests로 ollama HTTP API 직접 호출
 | 12 | `equation_filter.py`, `export_jsonl.py`(merge_paragraphs), `tab_extract.py` | phase.md Phase 12 |
 | 13 | `tab_chunk.py`, `chunk_builder.py`, `chunk_validate.py` | phase.md Phase 13 |
 | 14 | `tab_embedding.py`, `embedding_bge.py`, `faiss_index.py` | phase.md Phase 14, goal_v2.md |
-| 15 | `tab_rag.py`, `rag_search.py`, `rag_llm.py`, `faiss_index.py`, `embedding_bge.py` | phase.md Phase 15, goal_v2.md |
+| 15 | `embedding_bge.py`, `scripts/download_bge_m3.py`, `.gitignore`, `requirements.txt` | phase.md Phase 15 |
+| 16 | `chunk_builder.py`, `rules.py`(parse), `chunk_validate.py`, `export_jsonl.py` | phase.md Phase 16, docs/chunk_diagnosis.md |
+| 17 | `ollama_client.py`, `chunk_assembler.py`, `prompt_templates.py`, `rag_pipeline.py`, `faiss_index.py`, `embedding_bge.py` | phase.md Phase 17 |
+| 18 | `tab_rag.py`, `main_window.py`, `rag_pipeline.py` | phase.md Phase 18 |
+| 19 | `docs/ollama_setup.md`, `docs/phase17_llm_rag.md` | phase.md Phase 19 |
 
 매 Phase는 위 표에 해당하는 파일만 열어 작업하면 토큰 사용을 최소화할 수 있다.

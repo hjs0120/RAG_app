@@ -17,6 +17,7 @@ class RuleMatch:
     kind: str  # "chapter" | "section" | "article" | "paragraph"
     value: str  # 표시용 값 (예: "제 1 장 총칙", "101", "1")
     full_text: str  # 매칭된 전체 라인 텍스트(앞부분)
+    article_section: str | None = None  # article인 경우 "101. 적용"에서 "적용" 추출
 
 
 def _chapter_pattern() -> Pattern:
@@ -70,12 +71,20 @@ def match_section(line: str) -> RuleMatch | None:
 
 
 def match_article(line: str) -> RuleMatch | None:
-    """라인이 조문(article) 패턴이면 RuleMatch 반환. 2자리 이상 숫자."""
+    """라인이 조문(article) 패턴이면 RuleMatch 반환. 2자리 이상 숫자.
+    '101. 적용', '101. 하중' 등에서 절 이름(article_section) 추출.
+    """
     m = _article_pattern().match(line.strip())
     if not m:
         return None
     num, rest = m.group(1), m.group(2)
-    return RuleMatch(kind="article", value=num, full_text=line.strip())
+    section_name = rest.strip() if rest else None
+    return RuleMatch(
+        kind="article",
+        value=num,
+        full_text=line.strip(),
+        article_section=section_name or None,
+    )
 
 
 def match_paragraph(line: str) -> RuleMatch | None:

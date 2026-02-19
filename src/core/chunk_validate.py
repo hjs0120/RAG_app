@@ -32,7 +32,13 @@ def validate_chunks(
 
     if check_index_sequential:
         from itertools import groupby
-        key_fn = lambda c: (c.get("doc_id"), c.get("article"), c.get("paragraph"))
+        # Phase 16: section 포함하여 (doc_id, article, section, paragraph)별 chunk_index 검사
+        key_fn = lambda c: (
+            c.get("doc_id"),
+            c.get("article"),
+            c.get("section"),
+            c.get("paragraph"),
+        )
         sorted_chunks = sorted(chunks, key=lambda c: (*key_fn(c), c.get("chunk_index", 0)))
         for key, group in groupby(sorted_chunks, key=key_fn):
             indices = [c.get("chunk_index") for c in group]
@@ -40,7 +46,7 @@ def validate_chunks(
             if indices != expected:
                 all_ok = False
                 messages.append(
-                    f"doc_id/article/paragraph {key}: chunk_index가 1부터 순차가 아님 (got {indices})"
+                    f"doc_id/article/section/paragraph {key}: chunk_index가 1부터 순차가 아님 (got {indices})"
                 )
 
     if all_ok:
