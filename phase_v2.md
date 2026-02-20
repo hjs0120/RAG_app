@@ -32,7 +32,7 @@
 | 4 | 사용 탭 — 모델 관리, 질문 & 검색 영역 | ☑ |
 | 5 | 사용 탭 — 검색 결과, 조합 컨텍스트, 답변 영역 | ☑ |
 | 6 | 사용 탭 — 출처 영역 (PDF 뷰어 연동) | ☑ |
-| 7 | DB 생성 탭 — 파이프라인 통합 (PDF→텍스트→Chunk→임베딩) | ☐ |
+| 7 | DB 생성 탭 — 파이프라인 통합 (PDF→텍스트→Chunk→임베딩) | ☑ |
 | 8 | 증분 임베딩 (Incremental Embedding) | ☐ |
 | 9 | Chunk 단위 삭제 기능 | ☐ |
 | 10 | 출처 가독성 개선 (페이지/장/절/항 표시) | ☐ |
@@ -448,13 +448,27 @@ PDF 추출, 검수, Chunk 생성, 임베딩을 **하나의 통합 작업 공간*
 
 ### 진도 체크
 
-- [ ] PDF → 텍스트 추출 구역 (Import, Extract, Parse)
-- [ ] 검수 구역 (PDF·JSONL 뷰, 수정·저장)
-- [ ] Chunk 생성 구역
-- [ ] 임베딩 생성 구역
-- [ ] 파이프라인 흐름 연동
-- [ ] (선택) 본문 시작 페이지 저장 (content_start_pdf_page → docs_meta.json, Phase 10 매핑용)
-- [ ] 수동 검증 완료
+- [x] PDF → 텍스트 추출 구역 (Import, Extract, Parse)
+- [x] 검수 구역 (PDF·JSONL 뷰, 수정·저장)
+- [x] Chunk 생성 구역
+- [x] 임베딩 생성 구역
+- [x] 파이프라인 흐름 연동
+- [x] 본문 시작 페이지 저장 (content_start_pdf_page → docs_meta.json, Phase 10 매핑용)
+- [x] 수동 검증 완료
+
+### Phase 7 추가 구현 (완료)
+
+- **추출·필터**: `extract_pymupdf` 머릿말/꼬리말 8% 비율, 장/절 헤더·제목 조각(총칙, 일반사항 등) 여백 예외 보존. `equation_filter`에서 장/절 헤더·제목 조각을 들여쓰기 예외로 추가(중앙 정렬 제목이 수식으로 제거되던 문제 해결)
+- **구조 병합**: `line_rebuild`에서 "제 1 장" + "총칙" → "제 1 장 총칙", "제 1 절" + "일반사항" → "제 1 절 일반사항" 병합
+- **content_page**: `export_jsonl.build_record`에서 `content_start_pdf_page` 기반 `content_page`(문서 본문 페이지) 계산·저장. `chunk_builder` meta에 pages(content_page) 반영
+- **docs_meta**: `tab_db_create`에서 `docs_meta.json`에 doc_id → content_start_pdf_page 저장 (Phase 10 출처 표시용)
+- **검수 탭**: `tab_review`, `tab_db_create` 검수 창에서 **page (문서)** = content_page를 메인으로 표시, **PDF 물리**를 보조로 표시 — PDF 뷰어 번호와 동일하게 검수자 혼동 방지
+
+### Phase 7 종결 요약
+
+DB 생성 탭의 통합 파이프라인(Import → Extract → Parse → 검수 → Chunk → 임베딩)을 구현하고, 본문 시작 페이지(content_start_pdf_page)를 docs_meta에 저장하여 문서·물리 페이지 매핑 기반을 마련하였다. 추출 품질 개선(장/절 제목 equation_filter 예외, line_rebuild 병합)으로 "제 1 장 총칙", "제 1 절 일반사항" 등 구조 헤더가 정상 추출되도록 했으며, 검수 탭과 export에 content_page를 반영해 검수자·사용자 관점의 페이지 번호를 통일하였다.
+
+---
 
 ### Phase 7 연계: 본문 시작 페이지 저장 (페이지 번호 매핑용)
 

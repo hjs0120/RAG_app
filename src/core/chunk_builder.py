@@ -175,7 +175,7 @@ def build_chunk_meta(lines: list[dict], path: dict) -> dict[str, Any]:
     pages = []
     line_nos = []
     for ln in lines:
-        p = ln.get("page")
+        p = ln.get("content_page", ln.get("page"))
         if p is not None and p not in pages:
             pages.append(p)
         ln_no = ln.get("line_no")

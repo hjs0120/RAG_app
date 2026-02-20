@@ -26,12 +26,13 @@ def _get_device() -> str:
 
 
 def preload_model() -> None:
-    """bge-m3 모델을 미리 메모리에 로드. 첫 질문 지연 방지용."""
+    """bge-m3 모델을 미리 메모리에 로드. 이미 로드된 경우 캐시된 인스턴스 반환."""
     get_model()
 
 
 def get_model() -> "SentenceTransformer":
-    """bge-m3 모델 싱글톤 로드 (lazy). 로컬 경로 사용, HF_TOKEN 경고 없음."""
+    """bge-m3 모델 싱글톤 로드 (lazy). 이미 로드되어 있으면 캐시 반환.
+    DB 생성 탭 임베딩 후 사용 탭 사전모델 로드 시 동일 인스턴스 재사용."""
     if not hasattr(get_model, "_model"):
         from sentence_transformers import SentenceTransformer
 

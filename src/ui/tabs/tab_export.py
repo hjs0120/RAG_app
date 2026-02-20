@@ -105,6 +105,7 @@ class TabExport(QWidget):
                 doc_id=doc_id,
                 source_file=source_file,
                 merge_by_paragraph=merge_para,
+                content_start_pdf_page=self._state.get("content_start_pdf_page"),
             )
             self._label_status.setText(f"저장 완료: {out_file} ({count}행)")
         except Exception as e:

@@ -29,6 +29,7 @@ def parse_lines(lines: list[dict]) -> list[dict]:
     반환 시 각 라인에 "path" 키가 추가된다: { part, chapter, section, article, paragraph }.
 
     상태 규칙:
+    - part 만나면 → part 갱신, chapter/section/article/paragraph 초기화
     - chapter 만나면 → chapter 갱신, section/article/paragraph 초기화
     - section 만나면 → section 갱신, article/paragraph 초기화
     - article 만나면 → article 갱신, paragraph 초기화
@@ -50,7 +51,13 @@ def parse_lines(lines: list[dict]) -> list[dict]:
         matched: RuleMatch | None = classify_line(text)
 
         if matched:
-            if matched.kind == "chapter":
+            if matched.kind == "part":
+                path["part"] = matched.value
+                path["chapter"] = getattr(matched, "chapter_value", None) or None
+                path["section"] = None
+                path["article"] = None
+                path["paragraph"] = None
+            elif matched.kind == "chapter":
                 path["chapter"] = matched.value
                 path["section"] = None
                 path["article"] = None
@@ -62,9 +69,11 @@ def parse_lines(lines: list[dict]) -> list[dict]:
             elif matched.kind == "article":
                 path["article"] = matched.value
                 path["paragraph"] = None
-                # "101. 적용", "101. 하중" 등 절 이름(section) 추출 — Merge key 구분용
-                if getattr(matched, "article_section", None):
-                    path["section"] = matched.article_section
+                # section은 "제 N 절" 구조만 사용. 조문 제목("적용", "연차검사" 등)은 section에 넣지 않음
+                # 명시적 "제 N 장" 없을 때, 조문 번호(101/302) 앞자리로 chapter 추론
+                if path["chapter"] is None and len(matched.value) >= 2:
+                    ch_num = matched.value[0] if len(matched.value) <= 3 else matched.value[:2]
+                    path["chapter"] = f"제 {ch_num} 장"
             elif matched.kind == "paragraph":
                 path["paragraph"] = matched.value
 

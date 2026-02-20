@@ -95,6 +95,7 @@ def build_record(
     *,
     doc_id: str,
     source_file: str,
+    content_start_pdf_page: int | None = None,
 ) -> dict[str, Any]:
     """
     파싱된 라인 한 줄을 goal.md 1.3절 형식의 export 레코드로 변환한다.
@@ -103,14 +104,20 @@ def build_record(
         line: path가 붙은 라인 (text, bbox, page, line_no, path)
         doc_id: 문서 ID
         source_file: 소스 PDF 파일명(경로 제외)
+        content_start_pdf_page: 본문 시작 PDF 페이지. 있으면 content_page(문서 내 페이지) 계산
 
     Returns:
-        doc_id, page, line_no, path, text, bbox, source 를 갖는 딕셔너리
+        doc_id, page, content_page, line_no, path, text, bbox, source 를 갖는 딕셔너리
     """
     path = line.get("path") or {}
+    page = line.get("page")
+    content_page: int | None = None
+    if page is not None and content_start_pdf_page is not None:
+        content_page = max(1, page - content_start_pdf_page + 1)
     rec = {
         "doc_id": doc_id,
-        "page": line.get("page"),
+        "page": page,
+        "content_page": content_page if content_page is not None else page,
         "line_no": line.get("line_no"),
         "path": {
             "part": path.get("part"),
@@ -135,6 +142,7 @@ def write_jsonl(
     doc_id: str,
     source_file: str,
     merge_by_paragraph: bool = False,
+    content_start_pdf_page: int | None = None,
 ) -> int:
     """
     파싱된 라인 리스트를 JSONL 파일로 저장한다.
@@ -145,6 +153,7 @@ def write_jsonl(
         doc_id: 문서 ID
         source_file: 소스 PDF 파일명
         merge_by_paragraph: True면 같은 path의 연속 라인을 하나 레코드로 합침(bbox는 union)
+        content_start_pdf_page: 본문 시작 PDF 페이지. 있으면 content_page(문서 내 페이지) 추가
 
     Returns:
         쓴 레코드(라인) 수
@@ -155,7 +164,12 @@ def write_jsonl(
     count = 0
     with open(output_path, "w", encoding="utf-8") as f:
         for line in lines:
-            rec = build_record(line, doc_id=doc_id, source_file=source_file)
+            rec = build_record(
+                line,
+                doc_id=doc_id,
+                source_file=source_file,
+                content_start_pdf_page=content_start_pdf_page,
+            )
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
             count += 1
     return count

@@ -25,7 +25,8 @@
 | 필드 | 설명 |
 |------|------|
 | `doc_id` | 문서 식별자 |
-| `page` | 페이지 번호 |
+| `page` | 물리 PDF 페이지 번호 |
+| `content_page` | 문서 내 페이지 (본문 시작=1, 출처 표시용) |
 | `line_no` | 라인 번호 |
 | `path` | chapter / section / article / paragraph |
 | `text` | 라인 텍스트 |
@@ -48,6 +49,7 @@
 {
   "doc_id": "MOUS_RULE_2024",
   "page": 7,
+  "content_page": 1,
   "line_no": 14,
   "path": {
     "part": null,

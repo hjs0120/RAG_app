@@ -2,11 +2,18 @@
 수식 구간 제외 — 패턴 없는 들여쓰기 블록(변수 정의 등) 감지. Phase 12.
 페이지별 기준 왼쪽 여백(median x0)보다 충분히 오른쪽에서 시작하는 라인을
 수식/변수 정의 블록으로 간주해 제외한다.
+단, '중', '및', '또는' 등 문단 이어받는 어두로 시작하면 제외하지 않음.
+장/절 헤더(제 N 장, 제 N 절) 및 제목 조각(총칙, 일반사항 등)은 들여쓰기되어 있어도 보존.
 """
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
+
+_RE_CONTINUATION_START = re.compile(r"^\s*(중|및|또는|과|와|등|그리고)\s")
+_RE_STRUCTURAL_HEADER = re.compile(r"^제\s*\d+\s*[장절]")
+_TITLE_FRAGMENTS = frozenset({"총칙", "일반사항", "정의", "적용", "범위", "목적", "용어"})
 
 
 def _reference_left_per_page(lines: list[dict]) -> dict[int, float]:
@@ -69,6 +76,17 @@ def apply_equation_filter(
     reference_left = _reference_left_per_page(lines)
     out = []
     for line in lines:
+        text = line.get("text", "")
+        if _RE_CONTINUATION_START.match(text):
+            out.append(line)
+            continue
+        # 장/절 헤더 및 제목 조각은 들여쓰기되어 있어도 보존 (중앙 정렬된 제목)
+        if _RE_STRUCTURAL_HEADER.search(text):
+            out.append(line)
+            continue
+        if text.strip() in _TITLE_FRAGMENTS:
+            out.append(line)
+            continue
         if _is_indented_line(line, reference_left, indent_threshold_pt):
             continue
         out.append(line)

@@ -2,12 +2,21 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any, Callable
 
 import fitz  # PyMuPDF
 
 from src.core.toc_detector import apply_toc_filter
+
+# PyMuPDF span flags (bit 4 = bold)
+_RE_STRUCTURAL_HEADER = re.compile(r"^제\s*\d+\s*[장절]")
+# 장/절 제목 조각 (총칙, 일반사항, 정의 등) — 상단 여백에서도 보존
+_TITLE_FRAGMENTS = frozenset(
+    {"총칙", "일반사항", "정의", "적용", "범위", "목적", "용어"}
+)
+_TEXT_FONT_BOLD = getattr(fitz, "TEXT_FONT_BOLD", 16)
 
 
 def extract_lines(
@@ -29,7 +38,7 @@ def extract_lines(
         pdf_path: PDF 파일 경로
         after_toc: True면 차례(목차) 구간 이후부터만 반환 (Phase 4에서 적용)
         exclude_header_footer: True면 페이지 상/하단 여백 영역(머릿말/꼬리말) 라인 제외
-        header_footer_margin_ratio: 상·하단에서 이 비율만큼(기본 8%) 안쪽만 본문으로 간주
+        header_footer_margin_ratio: 상·하단에서 이 비율만큼(기본 8%) 제외. 장/절 헤더는 항상 포함
         progress_callback: (current_page_1based, total_pages) 호출
         **kwargs: 추후 옵션 (y_tolerance, hyphen_merge 등)
 
@@ -63,22 +72,38 @@ def extract_lines(
             for block in blocks:
                 for line in block.get("lines") or []:
                     parts = []
+                    segments: list[dict[str, Any]] = []
                     for span in line.get("spans") or []:
-                        parts.append(span.get("text", ""))
+                        s_text = span.get("text", "")
+                        parts.append(s_text)
+                        flags = span.get("flags", 0)
+                        font = span.get("font", "") or ""
+                        is_bold = bool(
+                            (flags & _TEXT_FONT_BOLD)
+                            or "bold" in font.lower()
+                            or "Bold" in font
+                        )
+                        segments.append({"text": s_text, "bold": is_bold})
                     text = "".join(parts).strip()
                     if not text:
                         continue
                     bbox = list(line["bbox"])
                     if exclude_header_footer:
-                        y0, y1 = bbox[1], bbox[3]
-                        if y1 <= top_cut or y0 >= bottom_cut:
-                            continue
+                        # 장/절 헤더(제 N 장, 제 N 절) 및 제목 조각(총칙, 일반사항 등)은 여백에서도 보존
+                        if not _RE_STRUCTURAL_HEADER.search(text):
+                            if text.strip() in _TITLE_FRAGMENTS:
+                                pass  # 제목 조각도 보존
+                            else:
+                                y0, y1 = bbox[1], bbox[3]
+                                if y1 <= top_cut or y0 >= bottom_cut:
+                                    continue
                     line_no += 1
                     lines_out.append({
                         "text": text,
                         "bbox": bbox,
                         "page": page_no,
                         "line_no": line_no,
+                        "segments": segments,
                     })
     finally:
         doc.close()
