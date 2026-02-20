@@ -33,6 +33,21 @@ class OllamaClient:
         except (requests.RequestException, ConnectionError):
             return False
 
+    def list_models(self) -> list[str]:
+        """
+        Ollama에 설치된 모델 목록 조회.
+        Returns:
+            모델 이름 리스트 (예: ["qwen2.5:7b-instruct", "llama3:latest"])
+        """
+        try:
+            r = requests.get(f"{self.base_url}/api/tags", timeout=5)
+            r.raise_for_status()
+            data = r.json()
+            models = data.get("models") or []
+            return [m.get("name", "") for m in models if m.get("name")]
+        except (requests.RequestException, ConnectionError, KeyError, TypeError):
+            return []
+
     def generate(
         self,
         prompt: str,
