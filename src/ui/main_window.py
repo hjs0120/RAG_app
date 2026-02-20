@@ -26,8 +26,8 @@ class MainWindow(QMainWindow):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("RAG 워크벤치")
-        self.setMinimumSize(640, 480)
-        self.resize(800, 600)
+        self.setMinimumSize(1280, 800)
+        self.resize(1600, 1000)
 
         # 탭 간 공유 상태
         self.app_state: dict = {
@@ -45,6 +45,8 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(central)
 
         self.tabs = QTabWidget()
-        self.tabs.addTab(TabUsage(self.app_state), "사용 탭")
+        usage_tab = TabUsage(self.app_state)
+        usage_tab.setMinimumSize(1200, 600)
+        self.tabs.addTab(usage_tab, "사용 탭")
         self.tabs.addTab(TabDBCreate(self.app_state), "DB 생성 탭")
         layout.addWidget(self.tabs)

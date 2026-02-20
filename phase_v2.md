@@ -30,12 +30,13 @@
 | 2 | DB Manager 모듈 신설 (load/save/append/remove/rebuild) | ☑ |
 | 3 | 탭 구조 전면 개편 — 사용 탭 / DB 생성 탭 2개로 재구성 | ☑ |
 | 4 | 사용 탭 — 모델 관리, 질문 & 검색 영역 | ☑ |
-| 5 | 사용 탭 — 검색 결과, 조합 컨텍스트, 답변 영역 | ☐ |
-| 6 | 사용 탭 — 출처 영역 (PDF 뷰어 연동) | ☐ |
+| 5 | 사용 탭 — 검색 결과, 조합 컨텍스트, 답변 영역 | ☑ |
+| 6 | 사용 탭 — 출처 영역 (PDF 뷰어 연동) | ☑ |
 | 7 | DB 생성 탭 — 파이프라인 통합 (PDF→텍스트→Chunk→임베딩) | ☐ |
 | 8 | 증분 임베딩 (Incremental Embedding) | ☐ |
 | 9 | Chunk 단위 삭제 기능 | ☐ |
-| 10 | V2 통합 검증 및 문서화 | ☐ |
+| 10 | 출처 가독성 개선 (페이지/장/절/항 표시) | ☐ |
+| 11 | V2 통합 검증 및 문서화 | ☐ |
 
 각 Phase의 **진도 체크** 항목을 검증 후 `[ ]` → `[x]`로 바꾸고, 위 표의 완료도 필요 시 ✅로 갱신하면 된다.
 
@@ -280,7 +281,7 @@ RAG_app/
 - [x] 질문 입력 영역 (대형 텍스트 박스)
 - [x] Top-k 조절
 - [x] 검색 / 답변 생성 버튼
-- [ ] 수동 검증 완료
+- [x] 수동 검증 완료
 
 ---
 
@@ -335,12 +336,18 @@ RAG_app/
 
 ### 진도 체크
 
-- [ ] 검색 결과 리스트 (점수, section, article, page, preview)
-- [ ] 선택 시 상세 보기
-- [ ] 조합 컨텍스트 영역 (길이, 그룹 구분)
-- [ ] 답변 영역 (충분한 크기)
-- [ ] 출처 분리 표시
-- [ ] 수동 검증 완료
+- [x] 검색 결과 리스트 (점수, section, article, page, preview)
+- [x] 선택 시 상세 보기
+- [x] 조합 컨텍스트 영역 (길이, 그룹 구분)
+- [x] 답변 영역 (충분한 크기)
+- [x] 출처 분리 표시
+- [x] 수동 검증 완료
+
+### Phase 5 추가 구현 (완료)
+
+- UI 단분리: 좌(모델/FAISS/질문/검색/컨텍스트/답변) | 우(출처/PDF)
+- 모델 사전 로드 완료 시에만 검색/답변 생성 버튼 활성화
+- 답변 인용 출처만 드롭다운에 표시 (`_extract_cited_sources`)
 
 ---
 
@@ -382,10 +389,18 @@ RAG_app/
 
 ### 진도 체크
 
-- [ ] 출처 클릭 이벤트
-- [ ] PDF 뷰어 영역 (페이지 렌더링)
-- [ ] 출처 → page → PDF 표시 연동
-- [ ] 수동 검증 완료
+- [x] 출처 클릭 이벤트 (출처 드롭다운 선택 → PDF 뷰어 연동)
+- [x] PDF 뷰어 영역 (우측 배치, 너비 맞춤/세로 스크롤)
+- [x] 출처 → page → PDF 표시 연동
+- [x] 인덱스 등록 시 원본 PDF 폴더 선택
+- [x] bge-m3 모델 확인 및 다운로드 버튼
+- [x] 수동 검증 완료
+
+### Phase 6 추가 구현 (완료)
+
+- 출처를 목록→드롭다운으로 변경
+- PDF 뷰어: 뷰포트 너비 맞춤, 세로 스크롤 (tab_review 방식)
+- 확대/축소 제거, 항상 전체 너비 표시
 
 ---
 
@@ -420,8 +435,10 @@ PDF 추출, 검수, Chunk 생성, 임베딩을 **하나의 통합 작업 공간*
 |------|------|
 | `src/ui/tabs/tab_db_create.py` | 통합 파이프라인 UI |
 | `src/core/` | extract, parse, export, chunk_builder, embedding_bge, faiss_index |
+| `src/core/toc_detector.py` | 본문 시작 감지 → content_start_pdf_page |
 | `src/ui/tabs/tab_review.py` | 검수 UI 로직 통합 또는 재사용 |
 | `src/ui/main_window.py` | app_state 등 공유 상태 |
+| `docs_meta.json` (output) | doc_id → content_start_pdf_page (Phase 10 표시용) |
 
 ### 수동 검증 방법
 
@@ -436,7 +453,18 @@ PDF 추출, 검수, Chunk 생성, 임베딩을 **하나의 통합 작업 공간*
 - [ ] Chunk 생성 구역
 - [ ] 임베딩 생성 구역
 - [ ] 파이프라인 흐름 연동
+- [ ] (선택) 본문 시작 페이지 저장 (content_start_pdf_page → docs_meta.json, Phase 10 매핑용)
 - [ ] 수동 검증 완료
+
+### Phase 7 연계: 본문 시작 페이지 저장 (페이지 번호 매핑용)
+
+표지·목차 때문에 **물리 PDF 페이지**와 **문서 본문 페이지**가 다를 수 있다.  
+(예: 본문 1페이지 = PDF 7페이지) 이 매핑을 위해 추출 시 본문 시작 physical page를 저장한다.
+
+- `toc_detector.detect_toc_start` → `body_start` 인덱스 → 해당 라인의 `page` = `content_start_pdf_page`
+- export/chunk 파이프라인에서 doc_id별 `content_start_pdf_page` 수집
+- `docs_meta.json` 또는 index 저장 시 `{ "doc_id": "xxx", "content_start_pdf_page": 7 }` 형태로 저장  
+  (Phase 10에서 표시용·Phase 6 PDF 뷰어용으로 사용)
 
 ---
 
@@ -540,7 +568,68 @@ PDF 추출, 검수, Chunk 생성, 임베딩을 **하나의 통합 작업 공간*
 
 ---
 
-## Phase 10: V2 통합 검증 및 문서화
+## Phase 10: 출처 가독성 개선 (페이지/장/절/항 표시)
+
+### 배경
+
+현재 출처는 청크 단위(doc_id, page, section, chunk_id)로 표시되어 사용자가 PDF에서 해당 위치를 찾기 어렵다. "몇 페이지에 몇 장 몇 절 몇 항" 형태로 알려주면 찾기 수월하다.
+
+### 부가: 물리 PDF 페이지 ↔ 문서 본문 페이지 매핑
+
+표지·목차 때문에 **물리 PDF 페이지 번호**와 **문서에 인쇄된 본문 페이지 번호**가 다르다.  
+(예: 테스트 문서 — 본문 1페이지 = PDF 7페이지. 검색 meta는 `page=7`인데 사용자가 문서에서 보는 번호는 "1".)
+
+| 구분 | 설명 |
+|------|------|
+| **물리 페이지** | PDF 파일 기준 1, 2, 3… (PyMuPDF, PDF 뷰어용) |
+| **문서 본문 페이지** | 본문 시작을 1로 하는 페이지 (사용자가 문서에서 보는 번호) |
+
+**구현 방향**
+
+1. **Phase 7에서**: 추출 시 `content_start_pdf_page` 수집·저장 (`docs_meta.json` 등)
+2. **Phase 10에서**:
+   - 표시: `document_page = physical_page - content_start_pdf_page + 1` → `"본문 p.1"` 형식
+   - PDF 뷰어: 계속 **물리 페이지** 사용 (렌더링은 `page_no` 그대로)
+   - `content_start_pdf_page`가 없으면 기존처럼 `p.{physical}`만 표시
+
+### 제안: 기존 meta 활용 (임베딩 단계 수정 불필요)
+
+| 방안 | 설명 |
+|------|------|
+| **A. 기존 meta 활용** | `rules_meta`/chunk meta에 이미 `article`, `section`, `paragraph`, `page` 포함. 포맷 함수만 추가해 `"p.12, 제10조, 과도한 부식, (2)항"` 형태로 표시. **권장.** |
+| B. 원본 JSONL 조회 | 원본 export JSONL에서 path/line 정보를 보강하여 표시. 추가 I/O 필요. |
+| C. 임베딩 단계 설계 변경 | chunk_builder/faiss meta에 `chapter`(장) 등 계층 정보를 명시적으로 포함. 신규 문서에 유리. |
+
+### 권장 구현 (방안 A)
+
+1. **rag_pipeline 또는 prompt_templates**: `_format_source_display(meta, doc_page_map)` 추가
+   - `"p.{page}, 제{article}조, {section}, {paragraph}항"` 형태로 포맷
+   - `doc_page_map`(doc_id→content_start_pdf_page) 있으면 `"본문 p.{doc_page}"` 표시, 없으면 `"p.{physical}"`
+   - `article="10"` → 제10조, `paragraph="(2)"` → (2)항
+2. **LLM 프롬프트용 출처**: 기존 `_format_source` 유지 (상세 정보)
+3. **UI 표시용 출처**: `_format_source_display` 결과 사용 (드롭다운, 답변 내 [출처] 대체 가능)
+4. **장(chapter)**: `meta.chapter`가 있으면 포함. chunk_builder에서 채우도록 하면 향후 확장 용이.
+5. **페이지 매핑**: `docs_meta.json`(또는 index 경로의 sidecar)에서 `content_start_pdf_page` 로드 후 `_format_source_display`에 전달
+
+### Phase 10에서 다루는 소스
+
+| 파일 | 내용 |
+|------|------|
+| `src/rag/rag_pipeline.py` | _format_source_display 추가 |
+| `src/ui/tabs/tab_usage.py` | 출처 드롭다운 표시, docs_meta 로드·전달 |
+| `src/core/chunk_builder.py` | (선택) meta.chapter 채우기 |
+| `docs_meta.json` (Phase 7 연계) | doc_id → content_start_pdf_page |
+
+### 진도 체크
+
+- [ ] _format_source_display 구현 (p.xx, 제x조, 절, 항)
+- [ ] 출처 드롭다운/답변 표시에 적용
+- [ ] docs_meta 기반 본문 페이지 표시 (물리↔문서 매핑)
+- [ ] 수동 검증 완료
+
+---
+
+## Phase 11: V2 통합 검증 및 문서화
 
 ### 목표
 
@@ -571,7 +660,7 @@ V2 성공 기준을 충족하는지 검증하고, 문서를 정리한다.
 
 - Phase 단위 또는 기능 단위로 커밋
 
-### Phase 10에서 다루는 소스
+### Phase 11에서 다루는 소스
 
 | 파일 | 내용 |
 |------|------|
@@ -611,6 +700,7 @@ V2 성공 기준을 충족하는지 검증하고, 문서를 정리한다.
 | 7 | `tab_db_create.py`, `core/`, `tab_review.py` | goal_v2.md §5 |
 | 8 | `db_manager.py`, `tab_db_create.py` | goal_v2.md §6.1 |
 | 9 | `db_manager.py`, `tab_db_create.py` | goal_v2.md §6.2 |
-| 10 | `docs/`, `readme.md`, `phase_v2.md` | goal_v2.md §9 |
+| 10 | rag_pipeline.py, tab_usage.py | phase_v2.md Phase 10 |
+| 11 | `docs/`, `readme.md`, `phase_v2.md` | goal_v2.md §9 |
 
 매 Phase는 위 표에 해당하는 파일만 열어 작업하면 토큰 사용을 최소화할 수 있다.

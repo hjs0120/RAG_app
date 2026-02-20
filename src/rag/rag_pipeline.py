@@ -43,6 +43,7 @@ class RAGResult:
     assembled_context: str
     answer: str
     sources: list[str]
+    sources_meta: list[dict[str, Any]] = field(default_factory=list)  # 출처별 meta (doc_id, page 등, PDF 뷰어 연동용)
     debug_info: dict[str, Any] = field(default_factory=dict)
 
 
@@ -87,6 +88,7 @@ class RAGPipeline:
                 assembled_context="",
                 answer=NO_GROUNDS_MSG,
                 sources=[],
+                sources_meta=[],
                 debug_info={"reason": "no_results"},
             )
 
@@ -100,6 +102,7 @@ class RAGPipeline:
                 assembled_context="",
                 answer=NO_GROUNDS_MSG,
                 sources=[],
+                sources_meta=[],
                 debug_info={**debug_info, "reason": "empty_assembled"},
             )
 
@@ -108,6 +111,7 @@ class RAGPipeline:
             _format_source(i + 1, sc["meta"])
             for i, sc in enumerate(selected_chunks)
         ]
+        sources_meta = [sc["meta"] for sc in selected_chunks]
 
         # 5. Ollama 답변 생성 (instruct 모델용 /api/chat 사용)
         messages = build_rag_chat_messages(assembled, sources, question)
@@ -127,5 +131,6 @@ class RAGPipeline:
             assembled_context=assembled,
             answer=answer,
             sources=sources,
+            sources_meta=sources_meta,
             debug_info=debug_info,
         )
