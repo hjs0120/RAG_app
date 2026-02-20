@@ -26,7 +26,7 @@
 
 | Phase | 내용 | 완료 |
 |-------|------|:----:|
-| 1 | 프로젝트 구조 리팩토링 — core/rag/db_manager/ui 분리 강화 | ☐ |
+| 1 | 프로젝트 구조 리팩토링 — core/rag/db_manager/ui 분리 강화 | ☑ |
 | 2 | DB Manager 모듈 신설 (load/save/append/remove/rebuild) | ☐ |
 | 3 | 탭 구조 전면 개편 — 사용 탭 / DB 생성 탭 2개로 재구성 | ☐ |
 | 4 | 사용 탭 — 모델 관리, 질문 & 검색 영역 | ☐ |
@@ -121,10 +121,10 @@ RAG_app/
 
 ### 진도 체크
 
-- [ ] `src/db/` 디렉터리 생성
-- [ ] core/rag/llm/ui 모듈 역할 분리 확인
-- [ ] 기존 import 경로 동작 확인
-- [ ] 수동 검증 완료
+- [x] `src/db/` 디렉터리 생성
+- [x] core/rag/llm/ui 모듈 역할 분리 확인
+- [x] 기존 import 경로 동작 확인
+- [x] 수동 검증 완료
 
 ---
 
