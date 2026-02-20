@@ -1,40 +1,48 @@
+# 설계문서 — PDF 규격문서 텍스트 추출 및 RAG 파이프라인
+
 ---
 
-## 설계문서 v0.1 — PDF 규격문서 텍스트 추출/구조화/JSON Export UI
+## 0. 범위 (Scope)
 
-### 0. 범위(Scope)
+| 항목 | 내용 |
+|------|------|
+| **입력** | 규격 PDF (예: 이동식 해양구조물 규칙_2024) |
+| **출력** | JSONL(라인 단위) → Chunk JSONL → FAISS 인덱스 → RAG 답변 |
+| **처리 범위** | 차례 이후 본문부터 추출 |
+| **UI** | PySide6 기반 탭 + 그룹박스 |
 
-* 입력: 규격 PDF(예: **이동식 해양구조물 규칙_2024**) 
-* 출력: **JSONL(권장)** 또는 CSV
-* 처리 범위: **차례 이후 본문부터 추출**
+**처리 범위 세부**
 
-  * 차례 표시는 “차 례”로 식별 가능 
-  * 본문 시작 예: “제 1 장 총칙 / 제 1 절 일반사항 / 101. 적용 …” 
-* UI: Python 기반(탭 + 그룹박스)
+- 차례 표시: `차\s*례`로 식별
+- 본문 시작: `제 1 장 총칙` / `제 1 절 일반사항` / `101. 적용` 등
 
 ---
 
 ## 1. 목표 출력 데이터 스펙
 
-### 1.1 레코드 단위
+### 1.1 라인 단위 레코드 (JSONL)
 
-* **한 줄(line) = 한 레코드**
-* line에는 “현재 문서의 경로(Path)” 메타데이터를 붙임
-  (요청하신 Part > Chapter > Section > Article > Paragraph)
+| 필드 | 설명 |
+|------|------|
+| `doc_id` | 문서 식별자 |
+| `page` | 페이지 번호 |
+| `line_no` | 라인 번호 |
+| `path` | chapter / section / article / paragraph |
+| `text` | 라인 텍스트 |
+| `bbox` | [x0, y0, x1, y1] (PDF 좌표) |
+| `source` | 원본 파일 정보 |
 
-### 1.2 이 PDF에 맞춘 Path 매핑(초안)
+### 1.2 Path 매핑 (장/절/조항)
 
-이 문서는 “Part”라는 영어 표기가 아니라 **장/절/조항 구조**로 보이므로, 우선 다음처럼 매핑하는 게 자연스럽다.
+| Path | 예시 |
+|------|------|
+| part | null (또는 규칙 본문) |
+| chapter | 제 1 장 총칙 |
+| section | 제 1 절 일반사항 |
+| article | 101 (조문 번호) |
+| paragraph | 1, (1), (가) 등 항/호/목 |
 
-* Part: (일단 비움 또는 “규칙 본문” 같은 고정값)
-* Chapter: `제 n 장 …`  (예: 제 1 장 총칙) 
-* Section: `제 n 절 …` (예: 제 1 절 일반사항) 
-* Article: `101.`, `202.` 같은 조문 번호 
-* Paragraph: `1.`, `(1)`, `(가)` 등 항/호/목
-
-> Part가 꼭 필요하면, “권/편/부” 개념이 없는 문서도 있으니 **part=null** 로 두고, 나중에 협의된 메타 모델로 확장하는 걸 추천.
-
-### 1.3 JSONL 출력 예시(형태)
+### 1.3 JSONL 출력 예시
 
 ```json
 {
@@ -54,139 +62,157 @@
 }
 ```
 
+### 1.4 Chunk JSONL (RAG용)
+
+| 필드 | 설명 |
+|------|------|
+| `chunk_id` | Chunk 식별자 |
+| `text` | Chunk 텍스트 (Merge/Split 후) |
+| `meta` | doc_id, article, section, pages, chunk_index 등 |
+
+- **Merge**: article + section + paragraph 기준 그룹핑
+- **Split**: target 600자 / max 1000자
+- 1줄 = 1chunk
+
 ---
 
 ## 2. 전체 처리 파이프라인
 
 ### 2.1 단계 요약
 
-1. **PDF Import**
-2. **페이지별 텍스트 추출(레이아웃 기반)**
-3. **라인 재구성(line rebuild)**
-4. **목록(차례) 구간 스킵**
-5. **정규화(헤더/푸터 제거, 공백 정리 등)**
-6. **구조 파싱(Path 태깅: Chapter/Section/Article/Paragraph)**
-7. **JSONL/CSV Export**
+```
+PDF Import
+    → 페이지별 텍스트 추출 (PyMuPDF 레이아웃)
+    → 라인 재구성 (line rebuild)
+    → 차례 구간 스킵
+    → 정규화 (공백, 헤더/푸터)
+    → Path 태깅 (Chapter/Section/Article/Paragraph)
+    → 표/그림/수식 필터 (표제목·그림제목만, 수식 제외)
+    → JSONL/CSV Export
+    → Chunk 생성 (Merge/Split)
+    → Chunk JSONL
+    → bge-m3 임베딩 (normalize)
+    → FAISS IndexFlatIP 저장
+    → RAG: 질문 임베딩 → 검색 → Chunk 재조합 → Ollama 답변
+```
+
+### 2.2 FAISS 저장 구조
+
+| 파일 | 설명 |
+|------|------|
+| `rules.index` | FAISS 벡터 인덱스 |
+| `rules_meta.jsonl` | 인덱스 i번째 벡터 ↔ chunk 메타 매핑 |
+
+- FAISS는 "0, 1, 2, …" 순서만 유지 → `meta_list[i]`로 chunk 정보 조회
 
 ---
 
-## 3. 핵심 알고리즘 설계
+## 3. 핵심 알고리즘
 
-### 3.1 “목록(차례) 이후부터” 시작점 탐지
+### 3.1 차례 이후 시작점 탐지
 
-* 규칙:
+- `차\s*례` 매칭 → toc_mode = True
+- toc_mode 중 `^제\s*\d+\s*장` 매칭 → toc_mode = False, 해당 시점부터 export
 
-  * `차 례` 라인이 나오면 이후 일정 구간은 “목차 영역”으로 간주 
-  * 본문 시작은 `제 1 장` 같은 **장 헤더**가 등장하는 첫 지점으로 확정 
+### 3.2 라인 추출 (PyMuPDF)
 
-**권장 구현**
+- **레이아웃 좌표 기반**: 같은 y 좌표끼리 묶어 라인 생성
+- 산출: `(text, bbox, page, line_no)`
 
-* 1차: 라인 텍스트에 `차\s*례` 매칭 → toc_mode=True
-* toc_mode 상태에서 `^제\s*\d+\s*장` 매칭이 나오면 toc_mode=False, 그 시점부터 export 시작
+### 3.3 Path 태깅 (상태 머신)
 
-### 3.2 라인 추출(중요)
+- chapter → section → article → paragraph 순으로 갱신
+- 하위 레벨 진입 시 상위 유지, 동급 이하 초기화
 
-목표가 “한 줄씩”이므로, PDF에서 텍스트를 그냥 `extract_text()`로 뽑으면 품질이 흔들릴 수 있음.
-**레이아웃 좌표 기반**으로 “같은 y좌표끼리 묶어 라인”을 만드는 방식이 필요.
+**정규식 패턴**
 
-* 엔진: **PyMuPDF(fitz)** 권장
-* 산출: `(text, bbox, page, line_no, font_size(optional))`
+- chapter: `^제\s*(\d+)\s*장`
+- section: `^제\s*(\d+)\s*절`
+- article: `^(\d+)\.\s*`
+- paragraph: `^(\d+)\.\s+` (항), `^\((\d+)\)\s+` (호), `^\((가|나|다|…)\)\s+` (목)
 
-### 3.3 Path 태깅(상태 머신)
+### 3.4 임베딩 및 FAISS (RAG)
 
-라인을 위에서 아래로 순서대로 읽으면서 “현재 위치”를 업데이트.
+| 단계 | 내용 |
+|------|------|
+| 임베딩 | chunk.jsonl → bge-m3 batch encode → **normalize** (IndexFlatIP = cosine) |
+| 저장 | FAISS IndexFlatIP, meta_list 순서 보장 |
+| 검색 | query 임베딩 → normalize → faiss.search(top_k) → meta_list로 변환 |
 
-* `chapter`를 만나면 → chapter 갱신, section/article/paragraph 초기화
-* `section`을 만나면 → section 갱신, article/paragraph 초기화
-* `article(101.)`을 만나면 → article 갱신, paragraph 초기화
-* `paragraph(1., (1), (가))`를 만나면 → paragraph 갱신(또는 누적 규칙 적용)
+### 3.5 RAG 답변
 
-**이 PDF에서 확인되는 패턴**
-
-* Chapter 예: “제 1 장 총칙” 
-* Section 예: “제 1 절 일반사항”, “제 2 절 정의” 
-* Article 예: “101. 적용” 
-
----
-
-## 4. UI 설계 (탭 + 그룹박스)
-
-### 탭 1) PDF Import
-
-**Group: 입력**
-
-* 파일 선택(다중 선택 가능)
-* 문서 ID(doc_id) 자동 생성/수정
-* 출력 디렉토리 지정
-
-**Group: 처리 범위**
-
-* “차례 이후부터” 체크박스(기본 ON)
-* 시작 조건 미리보기:
-
-  * 감지된 `차 례` 위치 / 감지된 첫 `제 n 장` 위치 표시
+- 검색 top-k → Chunk 조문/섹션 단위 재조합
+- Ollama(qwen2.5:7b-instruct 등)로 근거 기반 답변 생성
+- 출처 강제, 근거 부족 시 거절
 
 ---
 
-### 탭 2) Extract (텍스트 추출)
+## 4. 권장 파라미터
 
-**Group: 추출 엔진**
-
-* Engine: PyMuPDF (기본)
-* 스캔 PDF일 때 OCR 사용(옵션 토글, v0.1에선 비활성 가능)
-
-**Group: 라인화 옵션**
-
-* y-merge tolerance(기본값)
-* 공백 정규화
-* 하이픈 줄바꿈 병합
-
-**Group: 실행/로그**
-
-* 실행 버튼
-* 진행률(페이지 단위)
-* 결과 요약(총 라인 수 / 페이지별 라인 수)
+| 항목 | 값 |
+|------|-----|
+| embedding model | bge-m3 |
+| index type | IndexFlatIP (normalize 시 cosine 유사도) |
+| top_k | 5~8 (검색), 10 (UI 기본) |
+| chunk target | 600자 / max 1000자 |
+| LLM | qwen2.5:7b-instruct, qwen2.5:14b-instruct, llama3.1:8b-instruct |
+| temperature | 0.2~0.4 |
 
 ---
 
-### 탭 3) Parse (구조화/Path 태깅)
+## 5. UI 설계 (탭)
 
-**Group: 규칙(Rules)**
+### 탭 1: PDF Import
 
-* 정규식 규칙 세트 선택(문서별 YAML/JSON)
-* 실시간 테스트:
+- 파일 선택(다중), doc_id, 출력 디렉터리
+- "차례 이후부터" 체크박스 (기본 ON)
+- 감지된 `차 례` / 첫 `제 n 장` 위치 미리보기
 
-  * 샘플 라인 입력 → “이 라인은 chapter/section/article/paragraph 중 무엇으로 인식되는지” 표시
+### 탭 2: Extract
 
-**Group: Path 미리보기**
+- 엔진: PyMuPDF
+- 라인화 옵션 (y-merge, 공백 정규화, 하이픈 병합)
+- 표제목만/그림제목만 추출, 수식 제외 체크
+- 실행 버튼, 진행률, 결과 요약
 
-* 현재 선택 페이지/라인에 대해:
+### 탭 3: Parse (Path 태깅)
 
-  * `chapter/section/article/paragraph` 값
-  * 원문 라인 텍스트
+- 규칙 세트 선택, 샘플 테스트
+- Path 미리보기 (chapter/section/article/paragraph)
+
+### 탭 4: Export
+
+- JSONL/CSV, 필드 선택
+- DB Import 친화 검증
+
+### 탭 5: 검수
+
+- PDF·JSONL 로드, 좌우 분할 뷰
+- 라인 네비게이션, 수정·저장, bbox 표시
+
+### 탭 6: Chunk 생성
+
+- Merge key (doc_id, article, section, paragraph)
+- Split 규칙 (600/1000)
+- Chunk JSONL 생성 및 검증
+
+### 탭 7: 임베딩
+
+- Chunk JSONL 선택, 출력 경로
+- bge-m3 임베딩 → FAISS 저장
+- 검색 테스트 (top-k)
+
+### 탭 8: RAG
+
+- 질문 입력, [검색], [답변 생성]
+- Top-k 결과 리스트, 답변·출처 출력
+- 비동기 처리
 
 ---
 
-### 탭 4) Export (JSON/CSV)
+## 6. 내부 모듈 구조
 
-**Group: 포맷**
-
-* JSONL(기본), CSV(옵션)
-* 포함 필드 선택(doc_id, page, bbox 등)
-
-**Group: 출력**
-
-* 저장 버튼
-* “DB Import 친화 검증” 체크:
-
-  * JSON 파싱 가능 여부
-  * 필수 필드 누락 여부
-
----
-
-## 5. 내부 모듈 구조(권장)
-
-```text
+```
 src/
   app.py
   ui/
@@ -196,47 +222,50 @@ src/
       tab_extract.py
       tab_parse.py
       tab_export.py
+      tab_review.py
+      tab_chunk.py
+      tab_embedding.py
+      tab_rag.py
   core/
     extract_pymupdf.py
     line_rebuild.py
     normalize.py
     parse_state_machine.py
     rules.py
+    table_figure_filter.py
+    equation_filter.py
     export_jsonl.py
     export_csv.py
+    chunk_builder.py
+    chunk_validate.py
+    embedding_bge.py
+    faiss_index.py
+  llm/
+    ollama_client.py
+  rag/
+    rag_pipeline.py
+    chunk_assembler.py
+    prompt_templates.py
+    rag_config.py
 ```
 
 ---
 
-## 6. 규칙 파일(rules) 초안 (이 문서 전용)
+## 7. 품질/검증
 
-(개념 설계만 — 구현은 다음 단계에서 코드로)
-
-* chapter: `^제\s*(\d+)\s*장`
-* section: `^제\s*(\d+)\s*절`
-* article: `^(\d+)\.\s*`
-* paragraph:
-
-  * `^(\d+)\.\s+` (항)
-  * `^\((\d+)\)\s+` (호)
-  * `^\((가|나|다|라|마|바|사|아|자|차|카|타|파|하)\)\s+` (목)
+- **샘플링 미리보기**: 선택 페이지 라인별 Path 표시
+- **목록 스킵 검증**: 차례 이후 첫 "제 n 장"에서 시작 여부
+- **DB Import 검증**: JSON 파싱, 필수 필드 누락 여부
+- **Chunk 검증**: 길이, chunk_index, 누락 여부
+- **RAG 테스트 시나리오**: docs/test_scenarios.md
 
 ---
 
-## 7. 품질/검증 기능(필수)
+## 8. 참고 문서
 
-* **샘플링 미리보기**: “선택 페이지”를 라인 단위로 보여주고, 각 라인의 Path를 같이 표시
-* **목록 스킵 검증**: 차례 영역에서 export가 시작되지 않았는지 체크(“차 례” 이후 첫 “제 n 장”에서 시작했는지)
-
----
-
-## 8. v0.1 개발 순서(추천)
-
-1. 탭1: PDF Import + 파일 목록/경로 설정
-2. 탭2: PyMuPDF로 페이지별 라인 추출 + JSONL(raw) 저장
-3. 탭1 옵션: “차례 이후부터” 동작 구현(시작 인덱스 결정)
-4. 탭3: chapter/section/article/paragraph 파싱(state machine) 적용
-5. 탭4: JSONL export + 샘플 미리보기
-
----
-
+| 문서 | 내용 |
+|------|------|
+| `phase.md` | Phase 1~19 단계별 개발 계획·진도 |
+| `docs/setup.md` | PyTorch CUDA, bge-m3, FAISS 설정 |
+| `docs/ollama_setup.md` | Ollama 설치·모델·API |
+| `docs/phase17_llm_rag.md` | RAG 구현 상세, Chunk 재조합, 출처 규칙 |
