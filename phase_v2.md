@@ -27,8 +27,8 @@
 | Phase | 내용 | 완료 |
 |-------|------|:----:|
 | 1 | 프로젝트 구조 리팩토링 — core/rag/db_manager/ui 분리 강화 | ☑ |
-| 2 | DB Manager 모듈 신설 (load/save/append/remove/rebuild) | ☐ |
-| 3 | 탭 구조 전면 개편 — 사용 탭 / DB 생성 탭 2개로 재구성 | ☐ |
+| 2 | DB Manager 모듈 신설 (load/save/append/remove/rebuild) | ☑ |
+| 3 | 탭 구조 전면 개편 — 사용 탭 / DB 생성 탭 2개로 재구성 | ☑ |
 | 4 | 사용 탭 — 모델 관리, 질문 & 검색 영역 | ☐ |
 | 5 | 사용 탭 — 검색 결과, 조합 컨텍스트, 답변 영역 | ☐ |
 | 6 | 사용 탭 — 출처 영역 (PDF 뷰어 연동) | ☐ |
@@ -170,12 +170,12 @@ RAG_app/
 
 ### 진도 체크
 
-- [ ] load_index, save_index 구현
-- [ ] append_chunks 구현 (기존 index + new vectors)
-- [ ] remove_chunks 구현 (제외 후 재구성)
-- [ ] rebuild_index 구현
-- [ ] index ↔ meta 동기화 확인
-- [ ] 수동 검증 완료
+- [x] load_index, save_index 구현
+- [x] append_chunks 구현 (기존 index + new vectors)
+- [x] remove_chunks 구현 (제외 후 재구성)
+- [x] rebuild_index 구현
+- [x] index ↔ meta 동기화 확인
+- [x] 수동 검증 완료
 
 ---
 
@@ -224,10 +224,10 @@ RAG_app/
 
 ### 진도 체크
 
-- [ ] main_window 탭 2개로 변경
-- [ ] tab_usage.py, tab_db_create.py 스켈레톤 생성
-- [ ] 기존 탭 로직 보존(임시 import 또는 복사)
-- [ ] 수동 검증 완료
+- [x] main_window 탭 2개로 변경
+- [x] tab_usage.py, tab_db_create.py 스켈레톤 생성
+- [x] 기존 탭 로직 보존(임시 import 또는 복사) — 기존 tab_*.py 파일 유지
+- [ ] 수동 검증 완료 (PySide6 환경에서 앱 실행 후 확인)
 
 ---
 

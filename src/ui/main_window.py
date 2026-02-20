@@ -10,14 +10,8 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 
-from src.ui.tabs.tab_import import TabImport
-from src.ui.tabs.tab_extract import TabExtract
-from src.ui.tabs.tab_parse import TabParse
-from src.ui.tabs.tab_export import TabExport
-from src.ui.tabs.tab_review import TabReview
-from src.ui.tabs.tab_chunk import TabChunk
-from src.ui.tabs.tab_embedding import TabEmbedding
-from src.ui.tabs.tab_rag import TabRAG
+from src.ui.tabs.tab_usage import TabUsage
+from src.ui.tabs.tab_db_create import TabDBCreate
 
 
 def _default_output_dir() -> str:
@@ -27,11 +21,11 @@ def _default_output_dir() -> str:
 
 
 class MainWindow(QMainWindow):
-    """메인 윈도우 — 6개 탭(Import, Extract, Parse, Export, 검수, Chunk)."""
+    """메인 윈도우 — V2 탭 2개(사용 탭, DB 생성 탭)."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("PDF 규격문서 텍스트 추출")
+        self.setWindowTitle("RAG 워크벤치")
         self.setMinimumSize(640, 480)
         self.resize(800, 600)
 
@@ -41,9 +35,9 @@ class MainWindow(QMainWindow):
             "doc_id": "",              # 문서 ID (자동 생성/수정 가능)
             "output_dir": _default_output_dir(),
             "after_toc": True,         # 차례 이후부터 처리 (기본 ON)
-            "toc_preview": None,       # Phase 4: (toc_page, toc_ln, body_page, body_ln) 미리보기
-            "extract_lines": [],       # Phase 3: 추출 결과 라인 리스트
-            "parsed_lines": [],        # Phase 5: path가 붙은 파싱 결과 라인 리스트
+            "toc_preview": None,       # (toc_page, toc_ln, body_page, body_ln) 미리보기
+            "extract_lines": [],       # 추출 결과 라인 리스트
+            "parsed_lines": [],        # path가 붙은 파싱 결과 라인 리스트
         }
 
         central = QWidget()
@@ -51,12 +45,6 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(central)
 
         self.tabs = QTabWidget()
-        self.tabs.addTab(TabImport(self.app_state), "Import")
-        self.tabs.addTab(TabExtract(self.app_state), "Extract")
-        self.tabs.addTab(TabParse(self.app_state), "Parse")
-        self.tabs.addTab(TabExport(self.app_state), "Export")
-        self.tabs.addTab(TabReview(), "검수")
-        self.tabs.addTab(TabChunk(self.app_state), "Chunk")
-        self.tabs.addTab(TabEmbedding(self.app_state), "임베딩")
-        self.tabs.addTab(TabRAG(self.app_state), "RAG")
+        self.tabs.addTab(TabUsage(self.app_state), "사용 탭")
+        self.tabs.addTab(TabDBCreate(self.app_state), "DB 생성 탭")
         layout.addWidget(self.tabs)
