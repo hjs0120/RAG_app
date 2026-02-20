@@ -181,15 +181,21 @@ def build_index_from_chunks(
             chunk_index = c.get("chunk_index", i + 1)
             chunk_id = f"{doc_id}_{article}_{section}_{paragraph}_{chunk_index}"
 
+        chunk_meta = c.get("meta") or {}
+        pages = chunk_meta.get("pages") or []
+        page = pages[0] if pages else None
+
         meta_list.append({
             "chunk_id": chunk_id,
             "text": t[:500],  # 미리보기용 앞 500자
-            "meta": c.get("meta"),
+            "full_text": t,  # RAG 컨텍스트용 전체 텍스트
+            "meta": chunk_meta,
             "doc_id": c.get("doc_id"),
             "article": c.get("article"),
             "section": c.get("section"),
             "paragraph": c.get("paragraph"),
             "chunk_index": c.get("chunk_index"),
+            "page": page,
         })
 
     # 배치별 임베딩 (진행률 콜백 지원)

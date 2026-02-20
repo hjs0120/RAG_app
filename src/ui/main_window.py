@@ -17,6 +17,7 @@ from src.ui.tabs.tab_export import TabExport
 from src.ui.tabs.tab_review import TabReview
 from src.ui.tabs.tab_chunk import TabChunk
 from src.ui.tabs.tab_embedding import TabEmbedding
+from src.ui.tabs.tab_rag import TabRAG
 
 
 def _default_output_dir() -> str:
@@ -57,4 +58,5 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(TabReview(), "검수")
         self.tabs.addTab(TabChunk(self.app_state), "Chunk")
         self.tabs.addTab(TabEmbedding(self.app_state), "임베딩")
+        self.tabs.addTab(TabRAG(self.app_state), "RAG")
         layout.addWidget(self.tabs)

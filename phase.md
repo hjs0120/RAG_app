@@ -34,9 +34,9 @@
 | 14 | 임베딩 탭 — JSONL 임베딩, FAISS 저장, 테스트 | ✅ |
 | 15 | bge-m3 로컬·GPU 전환 | ✅ |
 | 16 | Chunk 품질 개선 — paragraph "0" 분리, section·Merge key 수정 | ✅ |
-| 17 | RAG 파이프라인 — Ollama 연동, Chunk 재조합, 출처 강제 | ☐ |
-| 18 | RAG 탭 UI — 질문/검색/답변, Top-k 디버깅, 비동기 처리 | ☐ |
-| 19 | RAG 문서화 및 테스트 — docs, 테스트 시나리오, 체크리스트 | ☐ |
+| 17 | RAG 파이프라인 — Ollama 연동, Chunk 재조합, 출처 강제 | ✅ |
+| 18 | RAG 탭 UI — 질문/검색/답변, Top-k 디버깅, 비동기 처리 | ✅ |
+| 19 | RAG 문서화 및 테스트 — docs, 테스트 시나리오, 체크리스트 | ✅ |
 
 (참고: 기존 “Phase 7 통합 검증 및 마무리”는 수동 확인으로 생략 가능하여, 고도화 단계인 검수 탭을 Phase 7부터 진행한다.)
 
@@ -1094,12 +1094,12 @@ requests
 
 ### 진도 체크
 
-- [ ] ollama_client.py: generate, health_check 구현
-- [ ] chunk_assembler.py: 그룹핑·재조합 로직
-- [ ] prompt_templates.py: RAG·질문 정제 템플릿
-- [ ] rag_pipeline.py: run_query, RAGResult
-- [ ] 출처 강제, threshold 적용
-- [ ] 수동 검증 완료
+- [x] ollama_client.py: generate, health_check 구현
+- [x] chunk_assembler.py: 그룹핑·재조합 로직
+- [x] prompt_templates.py: RAG·질문 정제 템플릿
+- [x] rag_pipeline.py: run_query, RAGResult
+- [x] 출처 강제, threshold 적용
+- [x] 수동 검증 완료
 
 ---
 
@@ -1141,12 +1141,12 @@ RAG 파이프라인(Phase 17)을 UI에서 사용하고, **검색 결과 디버�
 
 ### 진도 체크
 
-- [ ] 질문 입력, [검색], [답변 생성] 버튼
-- [ ] Top-k 검색 결과 리스트 (score, meta, preview)
-- [ ] 답변·출처 출력 영역
-- [ ] QThread/QRunnable로 비동기 처리
-- [ ] 상태 표시 (검색중, 답변 생성중)
-- [ ] 수동 검증 완료
+- [x] 질문 입력, [검색], [답변 생성] 버튼
+- [x] Top-k 검색 결과 리스트 (score, meta, preview)
+- [x] 답변·출처 출력 영역
+- [x] QThread/QRunnable로 비동기 처리
+- [x] 상태 표시 (검색중, 답변 생성중)
+- [x] 수동 검증 완료
 
 ---
 
@@ -1185,14 +1185,36 @@ Phase 17·18 구현 내용을 문서화하고, 테스트 시나리오와 완료 
 |------|------|
 | `docs/ollama_setup.md` (신규) | Ollama 설치·모델·API |
 | `docs/phase17_llm_rag.md` (신규) | 구현 요약·규칙·FAQ |
+| `docs/test_scenarios.md` (신규) | 테스트 시나리오 5개 정의 |
+
+### 커밋 단위 정리
+
+Phase 17~19 완료 시 권장 커밋 구조:
+
+```
+커밋 1: Phase 17 RAG 파이프라인
+  - src/llm/, src/rag/, rag_config
+
+커밋 2: Phase 18 RAG 탭 UI
+  - src/ui/tabs/tab_rag.py, main_window.py
+
+커밋 3: Phase 19 문서화
+  - docs/ollama_setup.md
+  - docs/phase17_llm_rag.md
+  - docs/test_scenarios.md
+  - phase.md (진도 반영)
+```
+
+(이미 통합되어 있으면 단일 커밋으로 처리해도 됨)
 
 ### 진도 체크
 
-- [ ] docs/ollama_setup.md 작성
-- [ ] docs/phase17_llm_rag.md 작성
-- [ ] 테스트 시나리오 5개 수행
-- [ ] Phase 17 완료 체크리스트 docs 반영
-- [ ] 커밋 단위 정리
+- [x] docs/ollama_setup.md 작성
+- [x] docs/phase17_llm_rag.md 작성
+- [x] docs/test_scenarios.md 작성 (테스트 시나리오 5개 정의)
+- [x] 테스트 시나리오 5개 수동 수행 (docs/test_scenarios.md 기준)
+- [x] Phase 17 완료 체크리스트 docs 반영 (phase17_llm_rag.md §9)
+- [x] 커밋 단위 정리
 
 ---
 
@@ -1218,6 +1240,6 @@ Phase 17·18 구현 내용을 문서화하고, 테스트 시나리오와 완료 
 | 16 | `chunk_builder.py`, `rules.py`(parse), `chunk_validate.py`, `export_jsonl.py` | phase.md Phase 16, docs/chunk_diagnosis.md |
 | 17 | `ollama_client.py`, `chunk_assembler.py`, `prompt_templates.py`, `rag_pipeline.py`, `faiss_index.py`, `embedding_bge.py` | phase.md Phase 17 |
 | 18 | `tab_rag.py`, `main_window.py`, `rag_pipeline.py` | phase.md Phase 18 |
-| 19 | `docs/ollama_setup.md`, `docs/phase17_llm_rag.md` | phase.md Phase 19 |
+| 19 | `docs/ollama_setup.md`, `docs/phase17_llm_rag.md`, `docs/test_scenarios.md` | phase.md Phase 19 |
 
 매 Phase는 위 표에 해당하는 파일만 열어 작업하면 토큰 사용을 최소화할 수 있다.

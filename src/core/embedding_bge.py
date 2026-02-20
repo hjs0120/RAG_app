@@ -25,6 +25,11 @@ def _get_device() -> str:
         return "cpu"
 
 
+def preload_model() -> None:
+    """bge-m3 모델을 미리 메모리에 로드. 첫 질문 지연 방지용."""
+    get_model()
+
+
 def get_model() -> "SentenceTransformer":
     """bge-m3 모델 싱글톤 로드 (lazy). 로컬 경로 사용, HF_TOKEN 경고 없음."""
     if not hasattr(get_model, "_model"):
