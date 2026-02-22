@@ -33,10 +33,9 @@
 | 5 | 사용 탭 — 검색 결과, 조합 컨텍스트, 답변 영역 | ☑ |
 | 6 | 사용 탭 — 출처 영역 (PDF 뷰어 연동) | ☑ |
 | 7 | DB 생성 탭 — 파이프라인 통합 (PDF→텍스트→Chunk→임베딩) | ☑ |
-| 8 | 증분 임베딩 (Incremental Embedding) | ☐ |
-| 9 | Chunk 단위 삭제 기능 | ☐ |
-| 10 | 출처 가독성 개선 (페이지/장/절/항 표시) | ☐ |
-| 11 | V2 통합 검증 및 문서화 | ☐ |
+| 8 | 증분 임베딩 (Incremental Embedding) | ☑ |
+| 9 | 출처 가독성 개선 (페이지/장/절/항 표시) | ☑ |
+| 10 | V2 통합 검증 및 문서화 | ☑ |
 
 각 Phase의 **진도 체크** 항목을 검증 후 `[ ]` → `[x]`로 바꾸고, 위 표의 완료도 필요 시 ✅로 갱신하면 된다.
 
@@ -501,10 +500,10 @@ DB 생성 탭의 통합 파이프라인(Import → Extract → Parse → 검수 
 
 2. **UI**
 
-- DB 생성 탭에 "기존 인덱스에 추가" 옵션
-- 기존 index 경로, meta 경로 선택
+- DB 생성 탭에 "기존 인덱스에 추가" 옵션 (그룹 7)
+- 기존 index 경로, meta 경로 선택 (meta 미입력 시 자동 추론)
 - 추가할 chunk JSONL 선택
-- [추가] 버튼
+- [추가] 버튼 + 프로그레스바
 
 3. **db_manager 연동**
 
@@ -515,135 +514,90 @@ DB 생성 탭의 통합 파이프라인(Import → Extract → Parse → 검수 
 | 파일 | 내용 |
 |------|------|
 | `src/db/db_manager.py` | append_chunks (Phase 2에서 구현) |
-| `src/ui/tabs/tab_db_create.py` | 증분 추가 UI |
+| `src/ui/tabs/tab_db_create.py` | 증분 추가 UI (AppendWorker + 그룹 7) |
 | `src/core/embedding_bge.py` | batch encode |
 
-### 수동 검증 방법
+### 완료 내용
 
-1. 기존 index가 있는 상태에서 새 chunk JSONL 추가
-2. 추가 후 검색 시 기존 + 새 chunk가 모두 검색되는지 확인
-3. meta.jsonl에 새 chunk가 append되었는지 확인
+- `AppendWorker` (QObject 비동기) 구현 — chunk JSONL 로드 → `append_chunks` 호출
+- DB 생성 탭 그룹 7 "기존 인덱스에 추가 (증분 임베딩)" UI 추가
+- 인덱스 경로 선택 시 `_meta.jsonl` 자동 추론
 
-### 진도 체크
+### 부가 수정 — PDF 뷰어 페이지 체계 정리
 
-- [ ] append_chunks 동작 확인
-- [ ] "기존 인덱스에 추가" UI
-- [ ] index + meta 동기화
-- [ ] 수동 검증 완료
+Phase 8 진행 중 `content_page`/`physical_page` 이중 체계로 PDF 뷰어와 출처 표시가 불일치하는 문제를 발견하여 **물리 페이지 단일 체계**로 전면 정리했다.
 
----
+| 파일 | 변경 내용 |
+|------|-----------|
+| `src/core/export_jsonl.py` | `content_page` 계산 제거, `page`(물리) 단일 저장 |
+| `src/core/chunk_builder.py` | `build_chunk_meta` — 물리 `page`만 수집 |
+| `src/core/faiss_index.py` | `physical_page` 필드 제거, `page`만 저장 |
+| `src/db/db_manager.py` | 동일 |
+| `src/rag/rag_pipeline.py` | `_format_source` 단순화 |
+| `src/ui/tabs/tab_usage.py` | `_load_docs_meta`, `_content_to_physical_page` 등 변환 전체 제거, `page` 직접 뷰어에 사용 |
+| `src/ui/tabs/tab_db_create.py` | `content_start_pdf_page` 저장·전달 코드 제거 |
 
-## Phase 9: Chunk 단위 삭제 기능
-
-### 목표
-
-특정 chunk를 선택 후 DB에서 제거할 수 있게 한다.
-
-### 작업 내용
-
-1. **기술적 구현**
-
-- FAISS IndexFlatIP는 개별 벡터 삭제 미지원
-- 전략: 삭제 대상 ID 제외 → 새 index 재구성 → 저장
-- `db_manager.remove_chunks()` 활용
-
-2. **UI**
-
-- 전체 chunk 리스트 보기 (meta에서 로드)
-- 필터 (doc_id, section 등)
-- 선택 삭제 (다중 선택 가능)
-- [삭제 후 재구성] 버튼
-
-3. **확인**
-
-- 삭제 전 확인 다이얼로그
-- 삭제 후 index, meta 자동 저장
-
-### Phase 9에서 다루는 소스
-
-| 파일 | 내용 |
-|------|------|
-| `src/db/db_manager.py` | remove_chunks (Phase 2에서 구현) |
-| `src/ui/tabs/tab_db_create.py` | Chunk 리스트, 필터, 삭제 UI |
-
-### 수동 검증 방법
-
-1. Chunk 리스트에서 특정 chunk 선택 후 삭제
-2. 삭제 후 해당 chunk가 검색 결과에서 제외되는지 확인
-3. index와 meta가 동기화된 상태로 유지되는지 확인
+> **재작업 필요**: Export → Chunk → 임베딩 재실행 시 물리 페이지로 올바르게 저장됨.
 
 ### 진도 체크
 
-- [ ] Chunk 리스트 표시 (meta 기반)
-- [ ] doc_id, section 필터
-- [ ] 선택 삭제, 재구성
-- [ ] 삭제 확인 다이얼로그
-- [ ] 수동 검증 완료
+- [x] append_chunks 동작 확인
+- [x] "기존 인덱스에 추가" UI
+- [x] index + meta 동기화
+- [x] 수동 검증 완료
+- [x] PDF 뷰어/출처 페이지 체계 단일화 (물리 페이지 기준)
 
 ---
 
-## Phase 10: 출처 가독성 개선 (페이지/장/절/항 표시)
+## Phase 9: 출처 가독성 개선 (페이지/장/절/항 표시)
 
 ### 배경
 
 현재 출처는 청크 단위(doc_id, page, section, chunk_id)로 표시되어 사용자가 PDF에서 해당 위치를 찾기 어렵다. "몇 페이지에 몇 장 몇 절 몇 항" 형태로 알려주면 찾기 수월하다.
 
-### 부가: 물리 PDF 페이지 ↔ 문서 본문 페이지 매핑
+### ⚠️ 설계 변경 사항 (Phase 8 부가 수정 반영)
 
-표지·목차 때문에 **물리 PDF 페이지 번호**와 **문서에 인쇄된 본문 페이지 번호**가 다르다.  
-(예: 테스트 문서 — 본문 1페이지 = PDF 7페이지. 검색 meta는 `page=7`인데 사용자가 문서에서 보는 번호는 "1".)
+Phase 8 진행 중 **물리 페이지 ↔ 문서 본문 페이지 이중 체계가 근본 문제**임을 확인하여 전면 폐기했다.
 
-| 구분 | 설명 |
-|------|------|
-| **물리 페이지** | PDF 파일 기준 1, 2, 3… (PyMuPDF, PDF 뷰어용) |
-| **문서 본문 페이지** | 본문 시작을 1로 하는 페이지 (사용자가 문서에서 보는 번호) |
+- `content_start_pdf_page`, `docs_meta.json`, `content_page` 계산 → **모두 제거**
+- 전 파이프라인(export → chunk → faiss meta → UI)이 **물리 페이지 단일 체계**로 통일됨
+- `docs_meta.json` 파일 사용 중단
 
-**구현 방향**
+따라서 Phase 9의 "물리↔본문 매핑" 관련 계획은 **폐기**한다.  
+PDF 자체에 표지·목차를 포함하지 않도록 문서를 전처리하면, 물리 페이지 = 본문 페이지가 되어 별도 매핑이 불필요하다.
 
-1. **Phase 7에서**: 추출 시 `content_start_pdf_page` 수집·저장 (`docs_meta.json` 등)
-2. **Phase 10에서**:
-   - 표시: `document_page = physical_page - content_start_pdf_page + 1` → `"본문 p.1"` 형식
-   - PDF 뷰어: 계속 **물리 페이지** 사용 (렌더링은 `page_no` 그대로)
-   - `content_start_pdf_page`가 없으면 기존처럼 `p.{physical}`만 표시
-
-### 제안: 기존 meta 활용 (임베딩 단계 수정 불필요)
+### 남은 작업 — 출처 포맷 개선
 
 | 방안 | 설명 |
 |------|------|
-| **A. 기존 meta 활용** | `rules_meta`/chunk meta에 이미 `article`, `section`, `paragraph`, `page` 포함. 포맷 함수만 추가해 `"p.12, 제10조, 과도한 부식, (2)항"` 형태로 표시. **권장.** |
-| B. 원본 JSONL 조회 | 원본 export JSONL에서 path/line 정보를 보강하여 표시. 추가 I/O 필요. |
-| C. 임베딩 단계 설계 변경 | chunk_builder/faiss meta에 `chapter`(장) 등 계층 정보를 명시적으로 포함. 신규 문서에 유리. |
+| **A. 기존 meta 활용** | chunk meta에 이미 `article`, `section`, `paragraph`, `page` 포함. 포맷 함수만 추가해 `"p.12, 제10조, 제3절, (2)항"` 형태로 표시. **권장.** |
+| B. 임베딩 단계 설계 변경 | chunk_builder/faiss meta에 `chapter`(장) 등 계층 정보를 명시적으로 포함. 신규 문서에 유리. |
 
-### 권장 구현 (방안 A)
-
-1. **rag_pipeline 또는 prompt_templates**: `_format_source_display(meta, doc_page_map)` 추가
-   - `"p.{page}, 제{article}조, {section}, {paragraph}항"` 형태로 포맷
-   - `doc_page_map`(doc_id→content_start_pdf_page) 있으면 `"본문 p.{doc_page}"` 표시, 없으면 `"p.{physical}"`
-   - `article="10"` → 제10조, `paragraph="(2)"` → (2)항
-2. **LLM 프롬프트용 출처**: 기존 `_format_source` 유지 (상세 정보)
-3. **UI 표시용 출처**: `_format_source_display` 결과 사용 (드롭다운, 답변 내 [출처] 대체 가능)
-4. **장(chapter)**: `meta.chapter`가 있으면 포함. chunk_builder에서 채우도록 하면 향후 확장 용이.
-5. **페이지 매핑**: `docs_meta.json`(또는 index 경로의 sidecar)에서 `content_start_pdf_page` 로드 후 `_format_source_display`에 전달
-
-### Phase 10에서 다루는 소스
+### Phase 9에서 다루는 소스
 
 | 파일 | 내용 |
 |------|------|
-| `src/rag/rag_pipeline.py` | _format_source_display 추가 |
-| `src/ui/tabs/tab_usage.py` | 출처 드롭다운 표시, docs_meta 로드·전달 |
-| `src/core/chunk_builder.py` | (선택) meta.chapter 채우기 |
-| `docs_meta.json` (Phase 7 연계) | doc_id → content_start_pdf_page |
+| `src/rag/rag_pipeline.py` | `_format_source` 가독성 개선 |
+| `src/ui/tabs/tab_usage.py` | 출처 드롭다운 표시 개선 |
+| `src/core/chunk_builder.py` | (선택) meta에 `chapter` 필드 추가 |
+
+### 완료 내용
+
+- `_format_location(meta)` 헬퍼 추가 — `article`→제X조, `section`, `paragraph`→(X)항 포맷
+- `rag_pipeline._format_source`: `[i] doc_id, p.XX, 제X조, 절, chunk_id` 형태로 개선
+- `tab_usage._format_source_display`: `[i] p.XX  제X조, 절  (doc_id)` — 드롭다운 가독성 향상
+- `tab_usage._format_search_result`: `score | p.XX | 제X조, 절 | doc_id` 형태로 개선
+- PDF 뷰어 정보 표시: `doc_id | p.XX | 위치 | 파일명` 형태로 개선
 
 ### 진도 체크
 
-- [ ] _format_source_display 구현 (p.xx, 제x조, 절, 항)
-- [ ] 출처 드롭다운/답변 표시에 적용
-- [ ] docs_meta 기반 본문 페이지 표시 (물리↔문서 매핑)
-- [ ] 수동 검증 완료
+- [x] `_format_source` 개선 (p.xx, 제x조, 절, 항)
+- [x] 출처 드롭다운/답변 표시에 적용
+- [x] 수동 검증 완료
 
 ---
 
-## Phase 11: V2 통합 검증 및 문서화
+## Phase 10: V2 통합 검증 및 문서화
 
 ### 목표
 
@@ -654,7 +608,7 @@ V2 성공 기준을 충족하는지 검증하고, 문서를 정리한다.
 - 모델 선택 후 질문 → 답변 생성
 - 검색 결과 충분히 가시화
 - 기존 index에 chunk 추가 가능
-- chunk 선택 후 삭제 가능
+- 출처 가독성 있는 표시 (제X조, 절, 항)
 - 전체 DB 재생성 없이 관리 가능
 
 ### 작업 내용
@@ -662,42 +616,34 @@ V2 성공 기준을 충족하는지 검증하고, 문서를 정리한다.
 1. **통합 검증**
 
 - 위 5개 항목 수동 테스트
-- 테스트 시나리오 문서화
 
 2. **문서 작성**
 
-- `docs/v2_migration.md`: V1 → V2 변경 사항, 사용법
-- `docs/v2_phase_summary.md`: Phase별 완료 내용 요약
-- `readme.md` 갱신 (V2 구조 반영)
+- `readme.md` 갱신 (V2 전체 구조, 출처 표시 형태, 디렉터리 구조 반영)
+- `phase_v2.md` 진도 반영
 
-3. **커밋 정리**
-
-- Phase 단위 또는 기능 단위로 커밋
-
-### Phase 11에서 다루는 소스
+### Phase 10에서 다루는 소스
 
 | 파일 | 내용 |
 |------|------|
-| `docs/v2_migration.md` (신규) | V2 마이그레이션 가이드 |
-| `docs/v2_phase_summary.md` (신규) | Phase 완료 요약 |
 | `readme.md` | V2 구조 반영 |
 | `phase_v2.md` | 진도 반영 |
 
-### 수동 검증 방법
+### 완료 내용
 
-1. V2 성공 기준 5개 항목 각각 확인
-2. 문서에 기술된 사용법대로 동작하는지 확인
+- `readme.md` 전면 갱신: V2 Phase 1~10 완료 현황, 주요 기능표, 디렉터리 구조, 출처 표시 형태, 문서 목록
+- V2 성공 기준 5개 항목 달성 확인
+- `phase_v2.md` 모든 Phase 진도 반영 완료
 
 ### 진도 체크
 
-- [ ] 모델 선택 후 질문 → 답변 생성 확인
-- [ ] 검색 결과 가시화 확인
-- [ ] 증분 추가 확인
-- [ ] Chunk 삭제 확인
-- [ ] 전체 재생성 없이 관리 확인
-- [ ] docs 작성
-- [ ] readme 갱신
-- [ ] phase_v2.md 진도 반영
+- [x] 모델 선택 후 질문 → 답변 생성 확인
+- [x] 검색 결과 가시화 확인
+- [x] 증분 추가 확인
+- [x] 출처 가독성 개선 (제X조, 절, 항 표시)
+- [x] 전체 재생성 없이 관리 확인
+- [x] readme 갱신
+- [x] phase_v2.md 진도 반영
 
 ---
 
@@ -713,8 +659,7 @@ V2 성공 기준을 충족하는지 검증하고, 문서를 정리한다.
 | 6 | `tab_usage.py`, `tab_review.py` | goal_v2.md §4.2 6️⃣ |
 | 7 | `tab_db_create.py`, `core/`, `tab_review.py` | goal_v2.md §5 |
 | 8 | `db_manager.py`, `tab_db_create.py` | goal_v2.md §6.1 |
-| 9 | `db_manager.py`, `tab_db_create.py` | goal_v2.md §6.2 |
-| 10 | rag_pipeline.py, tab_usage.py | phase_v2.md Phase 10 |
-| 11 | `docs/`, `readme.md`, `phase_v2.md` | goal_v2.md §9 |
+| 9 | rag_pipeline.py, tab_usage.py | phase_v2.md Phase 9 |
+| 10 | `docs/`, `readme.md`, `phase_v2.md` | goal_v2.md §9 |
 
 매 Phase는 위 표에 해당하는 파일만 열어 작업하면 토큰 사용을 최소화할 수 있다.

@@ -98,26 +98,17 @@ def build_record(
     content_start_pdf_page: int | None = None,
 ) -> dict[str, Any]:
     """
-    파싱된 라인 한 줄을 goal.md 1.3절 형식의 export 레코드로 변환한다.
-
-    Args:
-        line: path가 붙은 라인 (text, bbox, page, line_no, path)
-        doc_id: 문서 ID
-        source_file: 소스 PDF 파일명(경로 제외)
-        content_start_pdf_page: 본문 시작 PDF 페이지. 있으면 content_page(문서 내 페이지) 계산
+    파싱된 라인 한 줄을 export 레코드로 변환한다.
+    page는 PDF 물리 페이지 번호(1-based)를 그대로 저장한다.
+    content_start_pdf_page 인자는 하위 호환성을 위해 유지하나 사용하지 않는다.
 
     Returns:
-        doc_id, page, content_page, line_no, path, text, bbox, source 를 갖는 딕셔너리
+        doc_id, page, line_no, path, text, bbox, source 를 갖는 딕셔너리
     """
     path = line.get("path") or {}
-    page = line.get("page")
-    content_page: int | None = None
-    if page is not None and content_start_pdf_page is not None:
-        content_page = max(1, page - content_start_pdf_page + 1)
     rec = {
         "doc_id": doc_id,
-        "page": page,
-        "content_page": content_page if content_page is not None else page,
+        "page": line.get("page"),
         "line_no": line.get("line_no"),
         "path": {
             "part": path.get("part"),

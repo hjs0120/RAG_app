@@ -359,6 +359,39 @@ class EmbeddingWorker(QObject):
             self.error.emit(str(e))
 
 
+class AppendWorker(QObject):
+    """기존 FAISS 인덱스에 새 chunk를 증분 추가하는 비동기 Worker."""
+
+    progress = Signal(int, int)
+    finished = Signal(str, str)
+    error = Signal(str)
+
+    def __init__(self, chunk_path: str, index_path: str, meta_path: str, parent=None):
+        super().__init__(parent)
+        self._chunk_path = chunk_path
+        self._index_path = index_path
+        self._meta_path = meta_path
+
+    def run(self) -> None:
+        from src.db.db_manager import append_chunks
+
+        try:
+            chunks = load_jsonl(self._chunk_path)
+            if not chunks:
+                self.error.emit("Chunk JSONL에 레코드가 없습니다.")
+                return
+
+            idx_path, meta_path = append_chunks(
+                chunks,
+                index_path=self._index_path,
+                meta_path=self._meta_path or None,
+                progress_callback=lambda c, t: self.progress.emit(c, t),
+            )
+            self.finished.emit(str(idx_path), str(meta_path))
+        except Exception as e:
+            self.error.emit(str(e))
+
+
 def _save_docs_meta(output_dir: str | Path, doc_id: str, content_start_pdf_page: int | None) -> None:
     """docs_meta.json에 doc_id → content_start_pdf_page 저장 (Phase 10 매핑용)."""
     output_dir = Path(output_dir)
@@ -398,6 +431,8 @@ class TabDBCreate(QWidget):
         self._extract_worker: ExtractWorker | None = None
         self._embedding_thread: QThread | None = None
         self._embedding_worker: EmbeddingWorker | None = None
+        self._append_thread: QThread | None = None
+        self._append_worker: AppendWorker | None = None
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -571,6 +606,53 @@ class TabDBCreate(QWidget):
         emb_layout.addWidget(self._progress_embedding)
         layout.addWidget(group_embedding)
 
+        # 7. 기존 인덱스에 추가 (증분 임베딩)
+        group_append = QGroupBox("7. 기존 인덱스에 추가 (증분 임베딩)")
+        app_layout = QVBoxLayout(group_append)
+
+        row_app_chunk = QHBoxLayout()
+        row_app_chunk.addWidget(QLabel("추가할 Chunk JSONL:"))
+        self._edit_append_chunk = QLineEdit()
+        self._edit_append_chunk.setPlaceholderText("추가할 chunk_XXXX.jsonl")
+        row_app_chunk.addWidget(self._edit_append_chunk)
+        btn_browse_app_chunk = QPushButton("찾아보기")
+        btn_browse_app_chunk.clicked.connect(self._on_browse_append_chunk)
+        row_app_chunk.addWidget(btn_browse_app_chunk)
+        app_layout.addLayout(row_app_chunk)
+
+        row_app_idx = QHBoxLayout()
+        row_app_idx.addWidget(QLabel("기존 인덱스 (.index):"))
+        self._edit_append_index = QLineEdit()
+        self._edit_append_index.setPlaceholderText("기존 rules.index 경로")
+        row_app_idx.addWidget(self._edit_append_index)
+        btn_browse_app_idx = QPushButton("찾아보기")
+        btn_browse_app_idx.clicked.connect(self._on_browse_append_index)
+        row_app_idx.addWidget(btn_browse_app_idx)
+        app_layout.addLayout(row_app_idx)
+
+        row_app_meta = QHBoxLayout()
+        row_app_meta.addWidget(QLabel("기존 Meta JSONL:"))
+        self._edit_append_meta = QLineEdit()
+        self._edit_append_meta.setPlaceholderText("비워두면 인덱스 경로에서 자동 추론")
+        row_app_meta.addWidget(self._edit_append_meta)
+        btn_browse_app_meta = QPushButton("찾아보기")
+        btn_browse_app_meta.clicked.connect(self._on_browse_append_meta)
+        row_app_meta.addWidget(btn_browse_app_meta)
+        app_layout.addLayout(row_app_meta)
+
+        row_btn_app = QHBoxLayout()
+        self._btn_append = QPushButton("추가")
+        self._btn_append.clicked.connect(self._on_append)
+        self._label_append = QLabel("Chunk JSONL과 기존 인덱스를 선택 후 실행하세요.")
+        self._label_append.setStyleSheet("color: #666;")
+        row_btn_app.addWidget(self._btn_append)
+        row_btn_app.addWidget(self._label_append, 1)
+        app_layout.addLayout(row_btn_app)
+        self._progress_append = QProgressBar()
+        self._progress_append.setVisible(False)
+        app_layout.addWidget(self._progress_append)
+        layout.addWidget(group_append)
+
         layout.addStretch()
         scroll.setWidget(content)
         main_layout = QVBoxLayout(self)
@@ -659,10 +741,6 @@ class TabDBCreate(QWidget):
         self._btn_extract.setEnabled(True)
         self._progress_extract.setVisible(False)
         n = len(lines)
-        content_start: int | None = None
-        if lines and self._state.get("after_toc", True):
-            content_start = lines[0].get("page")
-        self._state["content_start_pdf_page"] = content_start
         self._label_extract.setText(f"완료: {n}줄 추출됨.")
         self._update_step_states()
 
@@ -699,15 +777,12 @@ class TabDBCreate(QWidget):
                 doc_id=doc_id,
                 source_file=source_file,
                 merge_by_paragraph=self._check_merge_para.isChecked(),
-                content_start_pdf_page=self._state.get("content_start_pdf_page"),
             )
             self._jsonl_path = str(out_path)
             self._records = load_jsonl(out_path)
             self._current_index = 0
             self._label_export.setText(f"저장 완료: {out_path} ({count}행)")
             self._edit_chunk_input.setText(self._jsonl_path)
-            content_start = self._state.get("content_start_pdf_page")
-            _save_docs_meta(output_dir, doc_id, content_start)
         except Exception as e:
             self._label_export.setText(f"저장 실패: {e}")
             return
@@ -847,3 +922,76 @@ class TabDBCreate(QWidget):
         self._btn_embedding.setEnabled(True)
         self._progress_embedding.setVisible(False)
         self._label_embedding.setText(f"오류: {msg}")
+
+    # ---- 7. 증분 추가 ----
+
+    def _on_browse_append_chunk(self) -> None:
+        start = self._edit_append_chunk.text().strip() or _default_output_dir(self._state)
+        path, _ = QFileDialog.getOpenFileName(
+            self, "추가할 Chunk JSONL", start, "JSONL (*.jsonl);;모든 파일 (*)",
+        )
+        if path:
+            self._edit_append_chunk.setText(path)
+
+    def _on_browse_append_index(self) -> None:
+        start = self._edit_append_index.text().strip() or _default_output_dir(self._state)
+        path, _ = QFileDialog.getOpenFileName(
+            self, "기존 인덱스 파일", start, "Index (*.index);;모든 파일 (*)",
+        )
+        if path:
+            self._edit_append_index.setText(path)
+            if not self._edit_append_meta.text().strip():
+                meta_guess = str(Path(path).parent / f"{Path(path).stem}_meta.jsonl")
+                self._edit_append_meta.setText(meta_guess)
+
+    def _on_browse_append_meta(self) -> None:
+        start = self._edit_append_meta.text().strip() or _default_output_dir(self._state)
+        path, _ = QFileDialog.getOpenFileName(
+            self, "기존 Meta JSONL", start, "JSONL (*.jsonl);;모든 파일 (*)",
+        )
+        if path:
+            self._edit_append_meta.setText(path)
+
+    def _on_append(self) -> None:
+        chunk_path = self._edit_append_chunk.text().strip()
+        index_path = self._edit_append_index.text().strip()
+        meta_path = self._edit_append_meta.text().strip()
+
+        if not chunk_path:
+            self._label_append.setText("추가할 Chunk JSONL을 선택하세요.")
+            return
+        if not index_path:
+            self._label_append.setText("기존 인덱스(.index) 파일을 선택하세요.")
+            return
+
+        self._btn_append.setEnabled(False)
+        self._progress_append.setVisible(True)
+        self._progress_append.setRange(0, 0)
+        self._label_append.setText("증분 추가 중…")
+
+        self._append_worker = AppendWorker(chunk_path, index_path, meta_path)
+        self._append_thread = QThread()
+        self._append_worker.moveToThread(self._append_thread)
+        self._append_thread.started.connect(self._append_worker.run)
+        self._append_worker.progress.connect(self._on_append_progress)
+        self._append_worker.finished.connect(self._on_append_finished)
+        self._append_worker.error.connect(self._on_append_error)
+        self._append_worker.finished.connect(self._append_thread.quit)
+        self._append_worker.error.connect(self._append_thread.quit)
+        self._append_thread.start()
+
+    def _on_append_progress(self, cur: int, tot: int) -> None:
+        if tot > 0:
+            self._progress_append.setMaximum(tot)
+            self._progress_append.setValue(cur)
+        self._label_append.setText(f"증분 추가 중… {cur}/{tot}")
+
+    def _on_append_finished(self, idx_path: str, meta_path: str) -> None:
+        self._btn_append.setEnabled(True)
+        self._progress_append.setVisible(False)
+        self._label_append.setText(f"추가 완료: {idx_path}, {meta_path}")
+
+    def _on_append_error(self, msg: str) -> None:
+        self._btn_append.setEnabled(True)
+        self._progress_append.setVisible(False)
+        self._label_append.setText(f"오류: {msg}")

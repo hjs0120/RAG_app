@@ -79,6 +79,40 @@ def _find_pdf_for_doc_id(pdf_folder: str | Path, doc_id: str) -> Path | None:
     return None
 
 
+def _format_location(meta: dict) -> str:
+    """article/section/paragraph를 사람이 읽기 편한 위치 문자열로 변환."""
+    article = (meta.get("article") or "").strip()
+    section = (meta.get("section") or "").strip()
+    paragraph = (meta.get("paragraph") or "").strip()
+    parts = []
+    if article and article != "_":
+        if re.match(r"^\d+$", article):
+            parts.append(f"제{article}조")
+        else:
+            parts.append(article)
+    if section and section not in ("_", article):
+        parts.append(section)
+    if paragraph and paragraph not in ("0", "_"):
+        if re.match(r"^\d+$", paragraph):
+            parts.append(f"({paragraph})항")
+        else:
+            parts.append(paragraph)
+    return ", ".join(parts)
+
+
+def _format_source_display(i: int, meta: dict) -> str:
+    """출처 드롭다운용 표시 문자열. page는 PDF 물리 페이지 번호."""
+    doc_id = meta.get("doc_id") or ""
+    page = meta.get("page")
+    if page is None:
+        chunk_meta = meta.get("meta") or {}
+        pages = chunk_meta.get("pages") or []
+        page = pages[0] if pages else ""
+    location = _format_location(meta)
+    loc_str = f"  {location}" if location else ""
+    return f"[{i}] p.{page}{loc_str}  ({doc_id})"
+
+
 def _extract_cited_sources(answer: str, max_sources: int) -> list[int]:
     """답변에서 인용된 출처 번호 추출 (1-based)."""
     if max_sources <= 0:
@@ -92,18 +126,16 @@ def _extract_cited_sources(answer: str, max_sources: int) -> list[int]:
 
 
 def _format_search_result(rank: int, idx: int, score: float, meta: dict) -> str:
-    """검색 결과 한 건 포맷 (점수, section, article, page, chunk 미리보기)."""
-    doc_id = meta.get("doc_id") or ""
+    """검색 결과 한 건 포맷. page는 PDF 물리 페이지 번호."""
     page = meta.get("page", "")
-    section = meta.get("section") or ""
-    article = meta.get("article") or ""
-    chunk_id = meta.get("chunk_id", str(idx))
+    doc_id = meta.get("doc_id") or ""
+    location = _format_location(meta)
     text_preview = (meta.get("text") or meta.get("full_text") or "")[:120]
     parts = [f"[{rank}] score={score:.4f}", f"p.{page}"]
-    if section:
-        parts.append(section)
-    if article:
-        parts.append(article)
+    if location:
+        parts.append(location)
+    if doc_id:
+        parts.append(doc_id)
     header = " | ".join(parts)
     return f"{header}\n{text_preview}..."
 
@@ -240,6 +272,7 @@ class TabUsage(QWidget):
         self._meta_list: list = []
         self._index_path: str | None = None
         self._meta_path: str | None = None
+
         self._search_worker: SearchWorker | None = None
         self._search_thread: QThread | None = None
         self._rag_worker: RAGWorker | None = None
@@ -574,9 +607,9 @@ class TabUsage(QWidget):
             self._edit_pdf_dir.setText(path)
 
     def _ensure_index_loaded(self) -> bool:
+        index_dir = self._edit_index_dir.text().strip() or _default_output_dir(self._state)
         if self._index is not None:
             return True
-        index_dir = self._edit_index_dir.text().strip() or _default_output_dir(self._state)
         idx_path = _index_path_from_base(index_dir)
         meta_path = _meta_path_from_base(index_dir)
         if idx_path.exists() and meta_path.exists():
@@ -656,6 +689,8 @@ class TabUsage(QWidget):
             return
         meta = self._last_sources_meta[index]
         doc_id = meta.get("doc_id") or ""
+
+        # page: PDF 물리 페이지 번호 (1-based), 뷰어 표시 번호와 동일
         page = meta.get("page")
         if page is None:
             chunk_meta = meta.get("meta") or {}
@@ -672,17 +707,19 @@ class TabUsage(QWidget):
             self._current_pdf_pixmap = None
             self._label_pdf_page.clear()
             self._label_pdf_page.setText(f"PDF를 찾을 수 없음\n(doc_id={doc_id})\n원본 PDF 폴더를 확인하세요.")
-            self._label_pdf_info.setText(f"doc_id={doc_id}, page={page} — PDF 미발견")
+            self._label_pdf_info.setText(f"doc_id={doc_id}, p.{page_no} — PDF 미발견")
             return
         pix = _render_page_to_pixmap(str(pdf_path), page_no, dpi_scale=2.0)
         if pix:
             self._current_pdf_pixmap = pix
-            self._label_pdf_info.setText(f"doc_id={doc_id} | p.{page_no} | {pdf_path.name}")
+            location = _format_location(meta)
+            loc_str = f" | {location}" if location else ""
+            self._label_pdf_info.setText(f"{doc_id} | p.{page_no}{loc_str} | {pdf_path.name}")
             self._display_pdf_fit_width()
         else:
             self._current_pdf_pixmap = None
             self._label_pdf_page.setText(f"페이지 렌더링 실패 (p.{page_no})")
-            self._label_pdf_info.setText(f"doc_id={doc_id}, page={page_no}")
+            self._label_pdf_info.setText(f"doc_id={doc_id}, p.{page_no}")
 
     def _display_pdf_fit_width(self) -> None:
         """PDF를 뷰포트 너비에 맞춰 표시. 상단 좌우 전체 보이고 아래는 스크롤로 확인."""
@@ -768,20 +805,17 @@ class TabUsage(QWidget):
         self._edit_answer.setPlainText(result.answer)
 
         # 출처 드롭다운 — 답변에 인용된 출처만 표시
-        all_sources = result.sources or []
         all_meta = getattr(result, "sources_meta", [])
-        cited = _extract_cited_sources(result.answer, len(all_sources))
+        cited = _extract_cited_sources(result.answer, len(all_meta))
         if cited:
-            filtered_sources = [all_sources[i - 1] for i in cited]
             filtered_meta = [all_meta[i - 1] for i in cited]
         else:
-            filtered_sources = all_sources
             filtered_meta = all_meta
         self._last_sources_meta = filtered_meta
         self._combo_sources.blockSignals(True)
         self._combo_sources.clear()
-        for s in filtered_sources:
-            self._combo_sources.addItem(s)
+        for j, m in enumerate(filtered_meta, 1):
+            self._combo_sources.addItem(_format_source_display(j, m))
         self._combo_sources.blockSignals(False)
         if self._combo_sources.count() > 0:
             self._combo_sources.setCurrentIndex(0)
