@@ -171,9 +171,9 @@ def split_into_chunks(
 
 
 def build_chunk_meta(lines: list[dict], path: dict) -> dict[str, Any]:
-    """chunk의 meta 필드: pages, line_no 범위, chapter/section."""
-    pages = []
-    line_nos = []
+    """chunk의 meta 필드: pages(물리 페이지), line_no 범위, chapter/section."""
+    pages: list[int] = []
+    line_nos: list[int] = []
     for ln in lines:
         p = ln.get("page")
         if p is not None and p not in pages:

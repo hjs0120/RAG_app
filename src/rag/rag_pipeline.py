@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -21,17 +22,39 @@ from src.rag.rag_config import (
 NO_GROUNDS_MSG = "관련 근거를 찾지 못했습니다."
 
 
+def _format_location(meta: dict[str, Any]) -> str:
+    """article/section/paragraph를 사람이 읽기 편한 위치 문자열로 변환."""
+    article = (meta.get("article") or "").strip()
+    section = (meta.get("section") or "").strip()
+    paragraph = (meta.get("paragraph") or "").strip()
+    parts = []
+    if article and article != "_":
+        if re.match(r"^\d+$", article):
+            parts.append(f"제{article}조")
+        else:
+            parts.append(article)
+    if section and section not in ("_", article):
+        parts.append(section)
+    if paragraph and paragraph not in ("0", "_"):
+        if re.match(r"^\d+$", paragraph):
+            parts.append(f"({paragraph})항")
+        else:
+            parts.append(paragraph)
+    return ", ".join(parts)
+
+
 def _format_source(i: int, meta: dict[str, Any]) -> str:
-    """chunk meta 기반 출처 문자열. [1] doc_id=..., page=..., section=..., chunk_id=..."""
+    """chunk meta 기반 출처 문자열. page는 PDF 물리 페이지 번호."""
     doc_id = meta.get("doc_id") or ""
     page = meta.get("page")
     if page is None:
         chunk_meta = meta.get("meta") or {}
         pages = chunk_meta.get("pages") or []
         page = pages[0] if pages else ""
-    section = meta.get("section") or ""
+    location = _format_location(meta)
     chunk_id = meta.get("chunk_id") or ""
-    return f"[{i}] doc_id={doc_id}, page={page}, section={section}, chunk_id={chunk_id}"
+    loc_str = f", {location}" if location else ""
+    return f"[{i}] {doc_id}, p.{page}{loc_str}, chunk_id={chunk_id}"
 
 
 @dataclass
@@ -43,6 +66,7 @@ class RAGResult:
     assembled_context: str
     answer: str
     sources: list[str]
+    sources_meta: list[dict[str, Any]] = field(default_factory=list)  # 출처별 meta (doc_id, page 등, PDF 뷰어 연동용)
     debug_info: dict[str, Any] = field(default_factory=dict)
 
 
@@ -87,6 +111,7 @@ class RAGPipeline:
                 assembled_context="",
                 answer=NO_GROUNDS_MSG,
                 sources=[],
+                sources_meta=[],
                 debug_info={"reason": "no_results"},
             )
 
@@ -100,6 +125,7 @@ class RAGPipeline:
                 assembled_context="",
                 answer=NO_GROUNDS_MSG,
                 sources=[],
+                sources_meta=[],
                 debug_info={**debug_info, "reason": "empty_assembled"},
             )
 
@@ -108,6 +134,7 @@ class RAGPipeline:
             _format_source(i + 1, sc["meta"])
             for i, sc in enumerate(selected_chunks)
         ]
+        sources_meta = [sc["meta"] for sc in selected_chunks]
 
         # 5. Ollama 답변 생성 (instruct 모델용 /api/chat 사용)
         messages = build_rag_chat_messages(assembled, sources, question)
@@ -127,5 +154,6 @@ class RAGPipeline:
             assembled_context=assembled,
             answer=answer,
             sources=sources,
+            sources_meta=sources_meta,
             debug_info=debug_info,
         )

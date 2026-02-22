@@ -14,25 +14,39 @@ _목_문자 = "가나다라마바사아자차카타파하"
 @dataclass
 class RuleMatch:
     """규칙 매칭 결과."""
-    kind: str  # "chapter" | "section" | "article" | "paragraph"
-    value: str  # 표시용 값 (예: "제 1 장 총칙", "101", "1")
+    kind: str  # "part" | "chapter" | "section" | "article" | "paragraph"
+    value: str  # 표시용 값
     full_text: str  # 매칭된 전체 라인 텍스트(앞부분)
     article_section: str | None = None  # article인 경우 "101. 적용"에서 "적용" 추출
+    chapter_value: str | None = None  # part 매칭 시 "1편 2장"에서 장값 (선택)
+
+
+def _part_chapter_pattern() -> Pattern:
+    """N편 N장 (예: 1편 2장 총칙) — part와 chapter 동시."""
+    return re.compile(r"^(?:제\s*)?(\d+)\s*편\s+(?:제\s*)?(\d+)\s*장\s*(.*)$", re.IGNORECASE)
+
+
+def _part_pattern() -> Pattern:
+    """편: 제 N 편 또는 N편 (예: 제 1 편 총칙, 1편 총칙). 이 문서에는 없으면 null."""
+    return re.compile(r"^(?:제\s*)?(\d+)\s*편\s*(.*)$", re.IGNORECASE)
 
 
 def _chapter_pattern() -> Pattern:
-    """제 n 장 … (예: 제 1 장 총칙)."""
-    return re.compile(r"^제\s*(\d+)\s*장\s*(.*)$", re.IGNORECASE)
+    """장: 제 N 장 또는 N장 (예: 제 1 장 총칙, 2장 검사) → chapter.
+    '1장의 규정', '1장 4절의' 등 본문 참조는 제외 (장 다음 의/를/을/에/숫자)."""
+    return re.compile(r"^(?:제\s*)?(\d+)\s*장\s*(?!의|를|을|에|\d)(.*)$", re.IGNORECASE)
 
 
 def _section_pattern() -> Pattern:
-    """제 n 절 … (예: 제 1 절 일반사항)."""
-    return re.compile(r"^제\s*(\d+)\s*절\s*(.*)$", re.IGNORECASE)
+    """절: 제 N 절 또는 N절 (예: 제 1 절 일반사항, 2절 검사) → section.
+    '4절의 규정' 등 본문 참조는 제외."""
+    return re.compile(r"^(?:제\s*)?(\d+)\s*절\s*(?!의|를|을|에|\d)(.*)$", re.IGNORECASE)
 
 
 def _article_pattern() -> Pattern:
-    """조문 번호 101., 202. 등 (2자리 이상 숫자 + 점)."""
-    return re.compile(r"^(\d{2,})\.\s*(.*)$")
+    """조문 번호 101., 202. 등 (2자리 이상 숫자 + 점).
+    '502.의 2항의', '105.를 따른다' 등 숫자.+조사(참조)는 article 아님."""
+    return re.compile(r"^(\d{2,})\.\s*(?!의|를|을|에)(.*)$")
 
 
 def _paragraph_item_pattern() -> Pattern:
@@ -50,13 +64,33 @@ def _paragraph_sub_sub_pattern() -> Pattern:
     return re.compile(r"^([(（]" + f"[{_목_문자}]" + r"[)）])\s*(.*)$")
 
 
+def match_part(line: str) -> RuleMatch | None:
+    """라인이 편(part) 패턴이면 RuleMatch 반환. '1편 2장' 형태면 chapter_value도 채움."""
+    s = line.strip()
+    m = _part_chapter_pattern().match(s)
+    if m:
+        p_num, ch_num, rest = m.group(1), m.group(2), m.group(3)
+        ch_label = f"제 {ch_num} 장 {rest.strip()}" if rest.strip() else f"제 {ch_num} 장"
+        return RuleMatch(
+            kind="part",
+            value=f"{p_num}편",
+            full_text=s,
+            chapter_value=ch_label,
+        )
+    m = _part_pattern().match(s)
+    if not m:
+        return None
+    num = m.group(1)
+    return RuleMatch(kind="part", value=f"{num}편", full_text=s)
+
+
 def match_chapter(line: str) -> RuleMatch | None:
     """라인이 장(chapter) 패턴이면 RuleMatch 반환."""
     m = _chapter_pattern().match(line.strip())
     if not m:
         return None
     num, rest = m.group(1), m.group(2)
-    label = f"제 {num} 장 {rest.strip()}" if rest.strip() else f"제 {num} 장"
+    label = f"제 {num} 장 {rest.strip()}" if rest and rest.strip() else f"제 {num} 장"
     return RuleMatch(kind="chapter", value=label, full_text=line.strip())
 
 
@@ -66,7 +100,7 @@ def match_section(line: str) -> RuleMatch | None:
     if not m:
         return None
     num, rest = m.group(1), m.group(2)
-    label = f"제 {num} 절 {rest.strip()}" if rest.strip() else f"제 {num} 절"
+    label = f"제 {num} 절 {rest.strip()}" if rest and rest.strip() else f"제 {num} 절"
     return RuleMatch(kind="section", value=label, full_text=line.strip())
 
 
@@ -104,9 +138,12 @@ def match_paragraph(line: str) -> RuleMatch | None:
 
 def classify_line(line: str) -> RuleMatch | None:
     """
-    라인을 순서대로 검사해 chapter → section → article → paragraph 중
+    라인을 순서대로 검사해 part → chapter → section → article → paragraph 중
     첫 번째로 매칭되는 규칙을 반환. 매칭 없으면 None.
     """
+    r = match_part(line)
+    if r:
+        return r
     r = match_chapter(line)
     if r:
         return r

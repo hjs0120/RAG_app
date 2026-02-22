@@ -1,163 +1,326 @@
-✅ 최종 구조 (FAISS 버전으로 재정리)
-1) 임베딩
 
-chunk.jsonl 읽기
+---
 
-bge-m3로 임베딩 생성
+# 📄 goal_V2.md
 
-embedding 벡터 normalize
+# RAG_app V2 — 사용성 중심 재설계 목표
 
-2) DB 저장(=FAISS)
+## 1. 배경
 
-FAISS index에 벡터 추가
+V1은 다음에 집중했다:
 
-chunk_id / 메타데이터는 별도 파일로 저장
+* PDF → 텍스트 추출
+* 구조 파싱
+* Chunk 생성
+* bge-m3 임베딩
+* FAISS 검색
+* Ollama 기반 RAG 답변 생성
+* 기능 검증 완료
 
-3) 검색
+V1은 **기능 구현과 기술 검증(POC)** 목적을 달성했다.
 
-질문 임베딩(bge-m3)
+V2에서는 이를 기반으로:
 
-FAISS top-k 검색
+> “개발자 중심 도구” → “실사용 가능한 RAG 워크벤치”로 전환한다.
 
-검색된 chunk_id로 원문/메타 조회
+---
 
-4) LLM 조합
+# 2. V2 핵심 방향
 
-검색 결과 chunk를 context로 구성
+V2는 다음 두 가지 축으로 재구성한다.
 
-ollama qwen2.5-coder:7b로 답변 생성
+## ① UI 구조 전면 개편
 
-🔥 FAISS 저장 구조 (실전에서 가장 흔한 방식)
-파일 2개가 생김
+## ② DB 관리 기능 고도화
 
-rules.index
+---
 
-FAISS 벡터 인덱스 파일
+# 3. UI 재설계 목표
 
-rules_meta.jsonl 또는 rules_meta.pkl
+ * 공간을 충분히 활용하도록 한다.
+ * 너무 타이트하게 만들면 가독성, 사용성이 떨어짐.
+ * 특히 PDF뷰어 같은건 안보임.
 
-인덱스의 i번째 벡터가 어떤 chunk인지 저장하는 매핑
+## 3.1 상위 구조 개편
 
-예:
+기존 다수 탭 구조를 재정리한다.
 
-FAISS는 내부적으로 “0번 벡터, 1번 벡터…” 이런 식이라
+### V2 탭 구조
 
-그 번호를 chunk_id랑 연결해주는 테이블이 필요함
+```
+[ 사용 탭 ]
+[ DB 생성 탭 ]
+```
 
-📌 왜 FAISS가 SQLite보다 낫냐 (딱 핵심만)
+---
 
-검색 속도 차원이 다름
+# 4. 사용 탭 (RAG 실행 전용 환경)
 
-chunk 수가 늘어도 버팀
+## 4.1 목적
 
-구현도 오히려 더 단순해짐
+* 최종 사용자가 사용하는 영역
+* 모델 선택 → 검색 → 답변 생성까지 한 화면에서 처리
 
-RAG 튜토리얼 표준 루트임
+---
 
-✅ bge-m3 + FAISS 개발 절차 (최종)
-0) 입력 준비
+## 4.2 주요 기능
 
-chunk.jsonl
+### 1️⃣ 모델 관리
 
-1줄 = 1chunk
+* Ollama 모델 목록 표시
+* 모델 선택
+* 모델 로드 상태 표시
+* 현재 모델 정보 표시
 
-chunk_id, text, meta 포함
+---
 
-1) 임베딩 생성 (bge-m3)
-해야 할 일
+### 2️⃣ 질문 & 검색 영역
 
-chunk.jsonl 로드
+* 질문 입력 영역 (대형 텍스트 박스)
+* Top-k 조절
+* 검색 버튼
+* 답변 생성 버튼
 
-text를 리스트로 모으고 batch 처리
+---
 
-embeddings 생성
+### 3️⃣ 검색 결과 영역 (가독성 강화)
 
-normalize (중요)
+* Top-k 결과 리스트
+* 점수 표시
+* section/article 정보 표시
+* page 정보 표시
+* chunk 미리보기 충분히 표시
+* 선택 시 상세 보기
 
-산출물
+---
 
-embeddings (N x D) float32
+### 4️⃣ 조합 컨텍스트 영역
 
-2) FAISS 인덱스 생성 & 저장
-해야 할 일
+* 실제 LLM에 전달된 assembled context 표시
+* 길이 표시
+* 그룹 단위 구분 표시
 
-FAISS index 생성
+---
 
-보통 MVP는 IndexFlatIP 추천 (코사인용)
+### 5️⃣ 답변 영역
 
-embeddings를 index.add()
+* 충분한 크기의 답변 출력 영역
+* 출처 분리 표시
+* 출처 클릭 시 해당 chunk 하이라이트 가능 (V2.1 확장 고려)
 
-index를 파일로 저장
+---
 
-산출물
+### 6 출처 영역역
 
-rules.index
+* 출처를 클릭하면 해당 PDF의 페이지를 표시(PDF뷰어어)
 
-3) 메타데이터 저장
-해야 할 일
+---
 
-FAISS는 “0,1,2…” 순서만 기억하니까,
-그 순서대로 메타를 저장해야 함.
+## 4.3 UI 설계 원칙
 
-예:
+* 스크롤 과도 분리 금지
+* 가로 공간 충분히 활용
+* 좌: 검색 결과 / 우: 답변 구조 추천
+* 데이터가 “잘 보이게” 설계
 
-meta_list[0] = chunk 0 정보
+---
 
-meta_list[1] = chunk 1 정보
+# 5. DB 생성 탭 (데이터 파이프라인 통합)
 
-산출물
+ * 다음 내용을 반영하되 필요에 따라 개선되는 방향 있으면 추천해서 설계한다.
+ * 텍스트 추출 검수 기능 같은 경우는 하나의 탭을 차지할 만큼 내용이 많으므로
+ * 탭 분리를 용도에 맞게 하도록 한다.
 
-rules_meta.jsonl
+## 5.1 목적
 
-4) 검색 함수 구현
-해야 할 일
+PDF → 구조화 → Chunk → 임베딩 → FAISS DB 관리까지
+하나의 통합 작업 공간으로 구성한다.
 
-query 입력 받기
+---
 
-query 임베딩(bge-m3)
+## 5.2 포함 기능
 
-normalize
+### 1️⃣ PDF → 텍스트 추출
 
-faiss.search(top_k)
+* Import
+* Extract
+* Parse
+* 검수
 
-결과 index → meta_list로 변환
+---
 
-chunk text 반환
+### 2️⃣ Chunk 생성
 
-5) qwen2.5-coder:7b로 RAG 답변 생성
-해야 할 일
+* JSONL 생성
+* Merge / Split 규칙 적용
 
-검색된 chunk top-k를 context로 묶기
+---
 
-“근거 기반 답변” 프롬프트로 qwen 호출
+### 3️⃣ 임베딩 생성
 
-답변 출력
+* bge-m3 로딩
+* FAISS Index 생성
+* index 파일 저장
 
-🧠 추천 파라미터 (너 환경 기준)
+---
 
-embedding model: bge-m3
+# 6. V2 핵심 확장 기능
 
-index type: IndexFlatIP
-(normalize하면 cosine과 동일)
+## 6.1 증분 임베딩 (Incremental Embedding)
 
-top_k: 5~8
+### V1 한계
 
-chunk target: 600자
+* 기존 인덱스는 전체 재생성 방식
 
-LLM: qwen2.5-coder:7b
+### V2 목표
 
-temperature: 0.2~0.4
+* 새로운 chunk 파일을 기존 FAISS index에 추가 가능
+* 기존 index + new vectors → append
 
-📁 최종 결과물
+### 요구 사항
 
-너 프로젝트 폴더에 이렇게 남게 될 거야:
+* index + meta JSONL 로드
+* 새로운 chunk 임베딩 생성
+* FAISS index.add() 수행
+* meta_list append
+* 저장
 
-chunk.jsonl
+---
 
-build_index.py (임베딩 + faiss 생성)
+## 6.2 Chunk 단위 삭제 기능
 
-rules.index
+### 목표
 
-rules_meta.jsonl
+* 특정 chunk 선택 후 제거
+* 필요 없는 chunk를 DB에서 삭제 가능
 
-rag_chat.py (검색 + qwen 응답)
+---
+
+### 기술적 고려
+
+FAISS IndexFlatIP는:
+
+* 개별 벡터 삭제 미지원
+
+따라서 전략:
+
+1. 삭제 대상 ID 제외
+2. 새로운 index 재구성
+3. 재저장
+
+---
+
+### UI 요구사항
+
+* 전체 chunk 리스트 보기
+* 필터 (doc_id, section 등)
+* 선택 삭제 버튼
+* 삭제 후 index 재구성
+
+---
+
+# 7. 데이터 관리 설계 원칙
+
+## 7.1 메타데이터 일관성 유지
+
+각 vector는 다음 메타를 반드시 보유:
+
+* doc_id
+* section
+* article
+* page
+* chunk_id
+* full_text
+
+---
+
+## 7.2 DB 무결성 보장
+
+* index와 meta.jsonl 항상 동기화
+* append/삭제 시 자동 백업
+* 에러 발생 시 롤백
+
+---
+
+# 8. 기술 구조 변경 방향
+
+## 8.1 분리 필요
+
+현재:
+
+* UI와 로직 혼재
+
+V2에서는:
+
+```
+core/
+rag/
+db_manager/
+ui/
+```
+
+처럼 분리 강화 고려
+
+---
+
+## 8.2 DB Manager 모듈 신설
+
+신규 모듈:
+
+```
+src/db/db_manager.py
+```
+
+기능:
+
+* load_index()
+* save_index()
+* append_chunks()
+* remove_chunks()
+* rebuild_index()
+
+---
+
+# 9. V2 성공 기준
+
+다음이 가능하면 V2 1차 완료로 본다:
+
+* 모델 선택 후 질문 → 답변 생성
+* 검색 결과 충분히 가시화
+* 기존 index에 chunk 추가 가능
+* chunk 선택 후 삭제 가능
+* 전체 DB 재생성 없이 관리 가능
+
+---
+
+# 10. V2의 의미
+
+V1:
+
+> 기술적으로 RAG가 동작함을 증명
+
+V2:
+
+> 실제로 운영 가능한 RAG 워크벤치 완성
+
+---
+
+# 11. 향후 확장 (V2 이후)
+
+* 다중 문서 DB 지원
+* 프로젝트 단위 관리
+* 문서 비교 검색
+* 다중 인덱스 병렬 검색
+* 벡터 DB 전환 옵션 (Milvus, Qdrant 등)
+
+---
+
+# 🔥 핵심 요약
+
+V2는 기능 추가가 아니라:
+
+> UX 재설계 + DB 관리 기능 확장
+
+이다.
+
+---

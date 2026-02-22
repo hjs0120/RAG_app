@@ -206,7 +206,13 @@ class TabReview(QWidget):
         self._field_source = QLineEdit()
         self._field_source.setReadOnly(True)
         form.addRow("doc_id:", self._field_doc_id)
-        form.addRow("page:", self._field_page)
+        # 검수자용: content_page(문서 페이지)를 메인으로 표시 — PDF 뷰어와 동일한 번호
+        self._field_content_page = QLineEdit()
+        self._field_content_page.setReadOnly(True)
+        form.addRow("page (문서):", self._field_content_page)
+        self._field_page = QLineEdit()
+        self._field_page.setReadOnly(True)
+        form.addRow("  PDF 물리:", self._field_page)
         form.addRow("line_no:", self._field_line_no)
         form.addRow("path:", self._field_path)
         form.addRow("text:", self._field_text)
@@ -355,6 +361,7 @@ class TabReview(QWidget):
         if not self._records or not (0 <= self._current_index < len(self._records)):
             self._field_doc_id.clear()
             self._field_page.clear()
+            self._field_content_page.clear()
             self._field_line_no.clear()
             self._field_path.clear()
             self._field_text.clear()
@@ -364,6 +371,8 @@ class TabReview(QWidget):
         rec = self._records[self._current_index]
         self._field_doc_id.setText(str(rec.get("doc_id", "")))
         self._field_page.setText(str(rec.get("page", "")))
+        cp = rec.get("content_page", rec.get("page", ""))
+        self._field_content_page.setText(str(cp))
         self._field_line_no.setText(str(rec.get("line_no", "")))
         self._field_path.setPlainText(_format_path(rec.get("path")))
         self._field_text.setPlainText(str(rec.get("text", "")))

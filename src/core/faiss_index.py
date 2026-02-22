@@ -187,8 +187,8 @@ def build_index_from_chunks(
 
         meta_list.append({
             "chunk_id": chunk_id,
-            "text": t[:500],  # 미리보기용 앞 500자
-            "full_text": t,  # RAG 컨텍스트용 전체 텍스트
+            "text": t[:500],
+            "full_text": t,
             "meta": chunk_meta,
             "doc_id": c.get("doc_id"),
             "article": c.get("article"),

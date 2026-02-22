@@ -738,7 +738,7 @@ Path가 붙은 최종 결과를 JSONL(및 선택 시 CSV)로 저장하고, DB Im
 
 ### 목표
 
-goal_v2.md 기반으로 **임베딩 탭**을 만들고, chunk JSONL을 bge-m3로 임베딩하고 FAISS 인덱스로 저장하며, 검색 테스트를 수행할 수 있게 한다.
+goal.md 기반으로 **임베딩 탭**을 만들고, chunk JSONL을 bge-m3로 임베딩하고 FAISS 인덱스로 저장하며, 검색 테스트를 수행할 수 있게 한다.
 
 ### 작업 내용
 
@@ -787,7 +787,7 @@ goal_v2.md 기반으로 **임베딩 탭**을 만들고, chunk JSONL을 bge-m3로
   - 결과 표시: 상위 k개 chunk_id, text 미리보기, 유사도 점수
 - **검증**: top-k 결과가 의미적으로 관련 있는지 수동 확인
 
-### 파라미터 (goal_v2.md 기준)
+### 파라미터 (goal.md 기준)
 
 | 항목 | 값 |
 |------|-----|
@@ -1235,7 +1235,7 @@ Phase 17~19 완료 시 권장 커밋 구조:
 | 11 | `table_figure_rules.py`, `table_figure_filter.py`, `extract_pymupdf.py`, `tab_extract.py` | phase.md Phase 11 |
 | 12 | `equation_filter.py`, `export_jsonl.py`(merge_paragraphs), `tab_extract.py` | phase.md Phase 12 |
 | 13 | `tab_chunk.py`, `chunk_builder.py`, `chunk_validate.py` | phase.md Phase 13 |
-| 14 | `tab_embedding.py`, `embedding_bge.py`, `faiss_index.py` | phase.md Phase 14, goal_v2.md |
+| 14 | `tab_embedding.py`, `embedding_bge.py`, `faiss_index.py` | phase.md Phase 14, goal.md |
 | 15 | `embedding_bge.py`, `scripts/download_bge_m3.py`, `.gitignore`, `requirements.txt` | phase.md Phase 15 |
 | 16 | `chunk_builder.py`, `rules.py`(parse), `chunk_validate.py`, `export_jsonl.py` | phase.md Phase 16, docs/chunk_diagnosis.md |
 | 17 | `ollama_client.py`, `chunk_assembler.py`, `prompt_templates.py`, `rag_pipeline.py`, `faiss_index.py`, `embedding_bge.py` | phase.md Phase 17 |
