@@ -60,7 +60,7 @@ python scripts/test_rag_canonical_phase5.py
 | 4 | Chunk 모듈 Canonical 기반으로 수정 (`chunk_builder.py`) | [x] |
 | 5 | FAISS 연동 및 RAG 파이프라인 출처 표기 개선 | [x] |
 | 6 | DB 생성 탭 UI 확장 — Raw/Canonical 미리보기 + 검수 기능 | [x] |
-| 7 | V3 통합 검증 및 문서화 | [ ] |
+| 7 | V3 통합 검증 및 문서화 | [x] |
 
 각 Phase의 **진도 체크** 항목을 검증 후 `[ ]` → `[x]`로 바꾸고, 위 표의 완료도 필요 시 ☑로 갱신하면 된다.
 
@@ -530,7 +530,12 @@ DB 생성 탭을 V3 파이프라인에 맞게 확장한다. Raw JSONL 미리보�
 ```
 feat(ui): Phase 6 — DB 생성 탭 Raw/Canonical 미리보기 + 검수
 
-(완료 후 커밋 메시지 정리)
+- tab_db_create: extract_pdf_raw, rule_marine_regulation 파이프라인 교체
+- Raw JSONL 미리보기 리스트, Canonical Tree View 미리보기
+- ReviewDialog: Raw/Canonical 탭, bbox 하이라이트 검수
+- main_window: FHD(1920×1080) 기준 UI 확장
+- extract_pymupdf, parse_state_machine 삭제
+- 테스트 스크립트 V3 파이프라인 대응 수정
 ```
 
 ---
@@ -607,21 +612,22 @@ V3 완료 기준(goal_v3.md §7)을 충족하는지 검증하고, 문서를 정�
 
 ### 진도 체크
 
-- [ ] PDF → Raw JSONL 정상 생성 확인
-- [ ] Raw → Canonical 정상 변환 확인
-- [ ] Canonical → Chunk → FAISS 정상 동작 확인
-- [ ] 기존 RAG 기능 동일 동작 확인
-- [ ] 출처 표기 장/절/조/페이지 자동 출력 확인
-- [ ] Raw/Canonical 검수 기능 동작 확인
-- [ ] `readme.md` 갱신
-- [ ] `phase_v3.md` 진도 반영
+- [x] PDF → Raw JSONL 정상 생성 확인
+- [x] Raw → Canonical 정상 변환 확인
+- [x] Canonical → Chunk → FAISS 정상 동작 확인
+- [x] 기존 RAG 기능 동일 동작 확인
+- [x] 출처 표기 장/절/조/페이지 자동 출력 확인
+- [x] Raw/Canonical 검수 기능 동작 확인
+- [x] `readme.md` 갱신
+- [x] `phase_v3.md` 진도 반영
 
 ### Phase 7 완료 시 커밋
 
 ```
 docs: Phase 7 — V3 통합 검증 및 문서화
 
-(완료 후 커밋 메시지 정리)
+- readme.md: V3 파이프라인 흐름, 디렉터리 구조, 주요 기능 갱신
+- phase_v3.md: Phase 7 진도 반영, V3 완료 기준 체크
 ```
 
 ---

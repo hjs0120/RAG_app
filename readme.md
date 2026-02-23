@@ -4,7 +4,7 @@ PySide6 기반 데스크톱 앱. PDF 규격문서에서 텍스트를 추출하�
 
 ---
 
-## V3 개발 현황 (진행 중)
+## V3 개발 현황 (완료)
 
 > V3 핵심 방향: **파일 포맷과 문서 의미 구조를 분리**하는 Canonical 기반 아키텍처 전환
 
@@ -15,8 +15,8 @@ PySide6 기반 데스크톱 앱. PDF 규격문서에서 텍스트를 추출하�
 | 3 | Raw → Canonical 변환 규칙 (`rule_marine_regulation.py`) | [x] |
 | 4 | Chunk 모듈 Canonical 기반으로 수정 (`chunk_builder.py`) | [x] |
 | 5 | FAISS 연동 및 RAG 파이프라인 출처 표기 개선 | [x] |
-| 6 | DB 생성 탭 UI 확장 — Raw/Canonical 미리보기 + 검수 기능 | [ ] |
-| 7 | V3 통합 검증 및 문서화 | [ ] |
+| 6 | DB 생성 탭 UI 확장 — Raw/Canonical 미리보기 + 검수 기능 | [x] |
+| 7 | V3 통합 검증 및 문서화 | [x] |
 
 ---
 
@@ -37,18 +37,31 @@ PySide6 기반 데스크톱 앱. PDF 규격문서에서 텍스트를 추출하�
 
 ---
 
+## V3 파이프라인 흐름
+
+```
+PDF
+  → extract_pdf_raw.py     (Raw JSONL 추출, block 단위)
+  → rule_marine_regulation.py  (Raw → Canonical 변환)
+  → chunk_builder.py       (Canonical 기반 Chunk 생성)
+  → embedding_bge.py + faiss_index.py
+  → rag_pipeline.py        (출처: structure_path 기반 "p.7, 제 1 장 총칙 > 제 101조")
+```
+
+---
+
 ## 주요 기능
 
 | 기능 | 설명 |
 |------|------|
 | PDF Import | PDF 선택, doc_id 지정, 차례 이후 추출 옵션 |
-| Extract | PyMuPDF 라인 추출 (표/그림/수식 제외, 머릿말/꼬리말 필터) |
-| Parse | Path 태깅 (chapter/section/article/paragraph), 장·절 제목 병합 |
-| 검수 | PDF·JSONL 좌우 분할 뷰, 라인 네비게이션, 수정·저장 |
-| Chunk 생성 | RAG용 Chunk JSONL (Merge/Split 규칙, min_chunk_len 필터) |
+| Raw 추출 | `extract_pdf_raw` — PDF → Raw JSONL (block_id, page, block_type, text, bbox) |
+| Canonical 변환 | `rule_marine_regulation` — Raw → Canonical (structure 계층: chapter/section/article/paragraph) |
+| Raw/Canonical 검수 | Raw 탭: bbox 하이라이트. Canonical 탭: 계층 Tree + 상세 |
+| Chunk 생성 | Canonical 기반 Chunk (structure_path, physical_page 메타) |
 | 임베딩 | bge-m3 임베딩, FAISS IndexFlatIP 저장 |
 | 증분 임베딩 | 기존 인덱스에 새 Chunk JSONL 추가 (AppendWorker 비동기) |
-| **RAG** | 질문 → FAISS 검색 → Chunk 재조합 → Ollama 답변 (출처 p.XX, 제X조 형태) |
+| **RAG** | 질문 → FAISS 검색 → Chunk 재조합 → Ollama 답변 (출처: p.XX, 제 X 장 > 제 N조 형태) |
 | PDF 뷰어 | 출처 선택 시 해당 PDF 페이지 표시 (물리 페이지 기준, 뷰포트 너비 맞춤) |
 
 ---
@@ -62,7 +75,7 @@ python src/app.py
 
 **RAG 사용 전 준비**
 
-1. DB 생성 탭에서 PDF → Extract → Parse → Chunk → 임베딩 순서로 실행  
+1. DB 생성 탭에서 PDF → Raw 추출 → Canonical 변환 → Canonical JSONL 저장 → Chunk 생성 → 임베딩 순서로 실행  
    → `output/rules.index`, `output/rules_meta.jsonl` 생성
 2. [Ollama](https://ollama.com) 설치 및 실행
 3. 모델 다운로드: `ollama pull qwen2.5:7b-instruct`
@@ -70,65 +83,56 @@ python src/app.py
 
 ---
 
-## 디렉터리 구조
+## 디렉터리 구조 (V3)
 
 ```
-RAG_app/
-├── src/
-│   ├── app.py
-│   ├── core/
-│   │   ├── canonical_schema.py       # [V3] Canonical JSON 데이터클래스
-│   │   ├── canonical_validator.py    # [V3] Canonical 스키마 검증
-│   │   ├── extract_pdf_raw.py        # [V3] PDF → Raw JSONL 변환
-│   │   ├── raw_validator.py          # [V3] Raw JSONL 스키마 검증
-│   │   ├── rule_marine_regulation.py # [V3] Raw → Canonical 변환 규칙
-│   │   ├── chunk_builder.py          # Chunk 생성 (V3에서 Canonical 기반으로 수정)
-│   │   ├── chunk_validate.py         # Chunk 검증
-│   │   ├── embedding_bge.py          # bge-m3 임베딩
-│   │   ├── faiss_index.py            # FAISS 인덱스
-│   │   ├── rules.py                  # 정규식 규칙 (chapter/section/article/paragraph)
-│   │   ├── table_figure_filter.py    # 표·그림 필터
-│   │   ├── table_figure_rules.py     # 표·그림 정규식 패턴
-│   │   ├── equation_filter.py        # 수식 필터
-│   │   ├── export_jsonl.py           # JSONL 저장/로드
-│   │   ├── line_rebuild.py           # 라인 재조합
-│   │   ├── normalize.py              # 텍스트 정규화
-│   │   └── toc_detector.py           # 목차 감지
-│   ├── rag/
-│   │   ├── citation_formatter.py     # [V3] 출처 문자열 자동 생성
-│   │   ├── rag_pipeline.py           # RAG 파이프라인
-│   │   ├── chunk_assembler.py        # Chunk 재조합
-│   │   ├── prompt_templates.py       # LLM 프롬프트 템플릿
-│   │   └── rag_config.py             # RAG 설정값
-│   ├── db/                           # DB Manager (인덱스 로드/저장/append/rebuild)
-│   ├── llm/                          # Ollama 클라이언트
-│   └── ui/
-│       └── tabs/
-│           ├── tab_usage.py          # 사용 탭 (모델/질문/검색/답변/PDF뷰어)
-│           ├── tab_db_create.py      # DB 생성 탭 (파이프라인 + 증분 임베딩)
-│           └── tab_review.py         # 검수 뷰 유틸
-├── data/              # 원본 PDF
-├── output/            # FAISS 인덱스, meta JSONL
-├── models/            # bge-m3 로컬 모델
-├── scripts/           # download_bge_m3.py 등
-├── docs/              # 설정/설명 문서
-├── goal_v2.md
-├── goal_v3.md
-├── phase_v2.md
-└── phase_v3.md
-```
+src/core/
+├── canonical_schema.py       # Canonical JSON 데이터클래스
+├── canonical_validator.py    # Canonical 스키마 검증
+├── extract_pdf_raw.py        # PDF → Raw JSONL 변환 (extract_pymupdf 대체)
+├── rule_marine_regulation.py # Raw → Canonical 변환 규칙 (parse_state_machine 대체)
+├── raw_validator.py          # Raw JSONL 스키마 검증
+├── chunk_builder.py          # Chunk 생성 (Canonical 기반)
+├── chunk_validate.py         # Chunk 검증
+├── embedding_bge.py          # bge-m3 임베딩
+├── faiss_index.py            # FAISS 인덱스
+├── rules.py                  # 정규식 규칙 (rule_marine_regulation에서 재사용)
+├── table_figure_filter.py    # 표·그림 필터
+├── table_figure_rules.py     # 표·그림 정규식 패턴
+├── equation_filter.py        # 수식 필터
+├── line_rebuild.py           # 라인 재조합 (extract_pdf_raw 내부 사용)
+├── normalize.py              # 텍스트 정규화 (extract_pdf_raw 내부 사용)
+├── toc_detector.py           # 목차 감지
+└── export_jsonl.py           # JSONL 저장/로드
 
-> `[V3]` 표시 항목은 V3 신규 개발 모듈 (현재 미생성, Phase 진행에 따라 추가됨)
+src/rag/
+├── citation_formatter.py     # 출처 문자열 자동 생성 (structure_path 기반)
+├── rag_pipeline.py           # RAG 파이프라인
+├── chunk_assembler.py        # Chunk 재조합
+├── prompt_templates.py       # LLM 프롬프트 템플릿
+└── rag_config.py             # RAG 설정값
+
+src/ui/tabs/
+├── tab_usage.py              # 사용 탭 (모델/질문/검색/답변/PDF뷰어)
+├── tab_db_create.py          # DB 생성 탭 (Raw→Canonical 파이프라인 + 검수 + Chunk + 임베딩)
+└── tab_review.py             # 검수 뷰 유틸 (별도 탭)
+
+data/                         # 원본 PDF
+output/                       # FAISS 인덱스, meta JSONL, Canonical JSONL
+models/                       # bge-m3 로컬 모델
+scripts/                      # download_bge_m3.py, test_*_phase*.py 등
+docs/                         # phase_v3.md, setup.md, ollama_setup.md 등
+```
 
 ---
 
-## 출처 표시 형태 (V2)
+## 출처 표시 형태 (V3)
 
-- 답변 내 출처: `[1] doc_id, p.13, 제301조, 제 3 절 검사, chunk_id=...`
-- 드롭다운: `[1] p.13  제301조, 제 3 절 검사  (doc_id)`
-- 검색 결과: `[1] score=0.8234 | p.13 | 제301조, 제 3 절 검사 | doc_id`
+- 답변 내 출처: `[1] doc_id, p.7, 제 1 장 총칙 > 제 101조, chunk_id=...`
+- 드롭다운: `[1] p.7  제 1 장 총칙 > 제 101조  (doc_id)`
+- 검색 결과: `[1] score=0.82 | p.7 | 제 1 장 총칙 > 제 101조 | doc_id`
 
-> 페이지 번호는 PDF 물리 페이지 기준. 표지·목차가 없는 PDF를 사용하면 문서 인쇄 페이지와 일치한다.
+> V3는 `citation_formatter`로 `structure_path` 기반 출처를 자동 생성. 페이지는 PDF 물리 페이지 기준.
 
 ---
 
@@ -149,5 +153,5 @@ RAG_app/
 
 ## 테스트 데이터
 
-- **경로**: `data/이동식 해양구조물 규칙_2024.pdf`
+- **경로**: `data/이동식 해양구조물 규칙_2024-7-92.pdf` (phase_v3.md 기준)
 - **인덱스**: `output/rules.index`, `output/rules_meta.jsonl`
