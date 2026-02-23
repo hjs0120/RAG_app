@@ -182,8 +182,11 @@ def build_index_from_chunks(
             chunk_id = f"{doc_id}_{article}_{section}_{paragraph}_{chunk_index}"
 
         chunk_meta = c.get("meta") or {}
-        pages = chunk_meta.get("pages") or []
-        page = pages[0] if pages else None
+        # Canonical: physical_page 우선, V2: pages[0]
+        page = chunk_meta.get("physical_page")
+        if page is None:
+            pages = chunk_meta.get("pages") or []
+            page = pages[0] if pages else None
 
         meta_list.append({
             "chunk_id": chunk_id,

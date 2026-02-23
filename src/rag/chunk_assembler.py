@@ -15,21 +15,29 @@ MAX_CONTEXT_CHARS = 3200  # 2500~3500 tokens ≈ ~3200자
 def _group_key(meta: dict[str, Any]) -> str:
     """
     그룹핑 키 생성 (우선순위):
-    1. article_id 또는 article_title (article)
-    2. section_title (section)
-    3. doc_id + page
+    Canonical: structure_path > doc_id + physical_page
+    V2: article > section > doc_id + page
     """
+    doc_id = (meta.get("doc_id") or "").strip()
+    chunk_meta = meta.get("meta") or {}
+
+    # Canonical: structure_path 기반
+    structure_path = (chunk_meta.get("structure_path") or "").strip()
+    if structure_path:
+        return f"{doc_id}|canon|{structure_path}"
+
+    # V2: article/section 기반
     article = (meta.get("article") or "").strip()
     section = (meta.get("section") or "").strip()
-    doc_id = (meta.get("doc_id") or "").strip()
     page = ""
-    chunk_meta = meta.get("meta") or {}
     pages = chunk_meta.get("pages") or []
-    if pages:
+    physical_page = chunk_meta.get("physical_page")
+    if physical_page is not None:
+        page = str(physical_page)
+    elif pages:
         page = str(pages[0])
 
     if article and article != "_":
-        # article + section으로 조문/절 구분 (예: 101.적용 vs 101.하중)
         if section and section != "_":
             return f"{doc_id}|{article}|{section}"
         return f"{doc_id}|{article}|"
@@ -89,8 +97,11 @@ def assemble_chunks(
     def sort_key(item: tuple[int, float, dict]) -> tuple:
         _, _, m = item
         chunk_meta = m.get("meta") or {}
-        pages = chunk_meta.get("pages") or [0]
-        return (m.get("doc_id", ""), pages[0], m.get("chunk_index", 0))
+        page = chunk_meta.get("physical_page")
+        if page is None:
+            pages = chunk_meta.get("pages") or [0]
+            page = pages[0] if pages else 0
+        return (m.get("doc_id", ""), page, m.get("chunk_index", 0))
 
     selected_sorted = sorted(selected, key=sort_key)
 

@@ -80,7 +80,11 @@ def _find_pdf_for_doc_id(pdf_folder: str | Path, doc_id: str) -> Path | None:
 
 
 def _format_location(meta: dict) -> str:
-    """article/section/paragraph를 사람이 읽기 편한 위치 문자열로 변환."""
+    """article/section/paragraph 또는 Canonical structure_path 기반 위치 문자열."""
+    chunk_meta = meta.get("meta") or {}
+    structure_path = (chunk_meta.get("structure_path") or "").strip()
+    if structure_path:
+        return structure_path
     article = (meta.get("article") or "").strip()
     section = (meta.get("section") or "").strip()
     paragraph = (meta.get("paragraph") or "").strip()
@@ -101,13 +105,15 @@ def _format_location(meta: dict) -> str:
 
 
 def _format_source_display(i: int, meta: dict) -> str:
-    """출처 드롭다운용 표시 문자열. page는 PDF 물리 페이지 번호."""
+    """출처 드롭다운용 표시 문자열. Canonical: structure_path, V2: article/section/paragraph."""
     doc_id = meta.get("doc_id") or ""
     page = meta.get("page")
     if page is None:
         chunk_meta = meta.get("meta") or {}
-        pages = chunk_meta.get("pages") or []
-        page = pages[0] if pages else ""
+        page = chunk_meta.get("physical_page")
+        if page is None:
+            pages = chunk_meta.get("pages") or []
+            page = pages[0] if pages else ""
     location = _format_location(meta)
     loc_str = f"  {location}" if location else ""
     return f"[{i}] p.{page}{loc_str}  ({doc_id})"
@@ -126,8 +132,11 @@ def _extract_cited_sources(answer: str, max_sources: int) -> list[int]:
 
 
 def _format_search_result(rank: int, idx: int, score: float, meta: dict) -> str:
-    """검색 결과 한 건 포맷. page는 PDF 물리 페이지 번호."""
-    page = meta.get("page", "")
+    """검색 결과 한 건 포맷. Canonical: structure_path, V2: article/section/paragraph."""
+    page = meta.get("page")
+    if page is None:
+        chunk_meta = meta.get("meta") or {}
+        page = chunk_meta.get("physical_page") or (chunk_meta.get("pages") or [""])[0]
     doc_id = meta.get("doc_id") or ""
     location = _format_location(meta)
     text_preview = (meta.get("text") or meta.get("full_text") or "")[:120]

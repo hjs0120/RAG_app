@@ -23,6 +23,33 @@
 
 ---
 
+## Python 가상환경
+
+- **권장 환경**: Conda 가상환경 `PySide6`
+- **Python 경로 예시**: `D:\001. Anaconda\PySide6\python.exe` (설치 경로에 따라 상이)
+- **Cursor 기본 인터프리터**: `.vscode/settings.json`의 `python.defaultInterpreterPath`에 위 경로 지정 — 미설정 시 base anaconda 사용됨
+
+### 테스트 실행
+
+```powershell
+# 방법 1: conda 활성화 후 실행
+conda activate PySide6
+python scripts/test_chunk_canonical_phase4.py
+python scripts/test_rag_canonical_phase5.py
+
+# 방법 2: Python 경로 직접 지정
+& "D:\001. Anaconda\PySide6\python.exe" scripts/test_rag_canonical_phase5.py
+```
+
+### 주요 의존성 (PySide6 환경 기준)
+
+- **PySide6** — UI
+- **PyMuPDF** — PDF 추출
+- **faiss** — 벡터 검색 (conda 설치, GPU 버전 가능)
+- **sentence-transformers** — BGE 임베딩
+
+---
+
 ## Phase 진도 요약
 
 | Phase | 내용 | 완료 |
@@ -31,7 +58,7 @@
 | 2 | PDF → Raw JSONL 변환 모듈 (`extract_pdf_raw.py`) | [x] |
 | 3 | Raw → Canonical 변환 규칙 (`rule_marine_regulation.py`) | [x] |
 | 4 | Chunk 모듈 Canonical 기반으로 수정 (`chunk_builder.py`) | [x] |
-| 5 | FAISS 연동 및 RAG 파이프라인 출처 표기 개선 | [ ] |
+| 5 | FAISS 연동 및 RAG 파이프라인 출처 표기 개선 | [x] |
 | 6 | DB 생성 탭 UI 확장 — Raw/Canonical 미리보기 + 검수 기능 | [ ] |
 | 7 | V3 통합 검증 및 문서화 | [ ] |
 
@@ -401,18 +428,23 @@ Canonical 기반 Chunk를 FAISS에 인덱싱하고, RAG 파이프라인의 출�
 
 ### 진도 체크
 
-- [ ] Canonical Chunk → FAISS 인덱스 생성 확인
-- [ ] `rag_pipeline._format_source` 개선 (`structure_path` 활용)
-- [ ] 출처 드롭다운/답변에 개선된 출처 표시 확인
-- [ ] 기존 V2 인덱스 하위 호환 동작 확인
-- [ ] 수동 검증 완료
+- [x] Canonical Chunk → FAISS 인덱스 생성 확인
+- [x] `rag_pipeline._format_source` 개선 (`structure_path` 활용)
+- [x] 출처 드롭다운/답변에 개선된 출처 표시 확인
+- [x] 기존 V2 인덱스 하위 호환 동작 확인
+- [x] 수동 검증 완료
 
 ### Phase 5 완료 시 커밋
 
 ```
 feat(rag): Phase 5 — FAISS 연동 및 RAG 출처 표기 개선
 
-(완료 후 커밋 메시지 정리)
+- faiss_index: Canonical meta(physical_page) 지원
+- citation_formatter: format_citation_from_meta(meta) 추가
+- rag_pipeline: structure_path 기반 _format_source 개선
+- tab_usage: _format_source_display, _format_location Canonical 대응
+- chunk_assembler: structure_path 기반 그룹핑
+- scripts/test_rag_canonical_phase5.py 검증 스크립트 추가
 ```
 
 ---

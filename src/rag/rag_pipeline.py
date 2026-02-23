@@ -8,6 +8,7 @@ from typing import Any
 
 from src.core.embedding_bge import encode_query
 from src.core.faiss_index import search
+from src.rag.citation_formatter import format_citation_from_meta
 from src.llm.ollama_client import OllamaClient
 from src.rag.chunk_assembler import assemble_chunks
 from src.rag.prompt_templates import build_rag_chat_messages
@@ -23,7 +24,11 @@ NO_GROUNDS_MSG = "관련 근거를 찾지 못했습니다."
 
 
 def _format_location(meta: dict[str, Any]) -> str:
-    """article/section/paragraph를 사람이 읽기 편한 위치 문자열로 변환."""
+    """article/section/paragraph 또는 Canonical structure_path 기반 위치 문자열."""
+    chunk_meta = meta.get("meta") or {}
+    structure_path = (chunk_meta.get("structure_path") or "").strip()
+    if structure_path:
+        return structure_path
     article = (meta.get("article") or "").strip()
     section = (meta.get("section") or "").strip()
     paragraph = (meta.get("paragraph") or "").strip()
@@ -44,17 +49,13 @@ def _format_location(meta: dict[str, Any]) -> str:
 
 
 def _format_source(i: int, meta: dict[str, Any]) -> str:
-    """chunk meta 기반 출처 문자열. page는 PDF 물리 페이지 번호."""
+    """chunk meta 기반 출처 문자열. Canonical: structure_path, V2: article/section/paragraph."""
     doc_id = meta.get("doc_id") or ""
-    page = meta.get("page")
-    if page is None:
-        chunk_meta = meta.get("meta") or {}
-        pages = chunk_meta.get("pages") or []
-        page = pages[0] if pages else ""
-    location = _format_location(meta)
-    chunk_id = meta.get("chunk_id") or ""
-    loc_str = f", {location}" if location else ""
-    return f"[{i}] {doc_id}, p.{page}{loc_str}, chunk_id={chunk_id}"
+    citation = format_citation_from_meta(meta)
+    # 출력 예: "[1] MOUS_RULE_2024, p.7, 제 1 장 총칙 > 제 101조"
+    if citation:
+        return f"[{i}] {doc_id}, {citation}"
+    return f"[{i}] {doc_id}"
 
 
 @dataclass
