@@ -1,4 +1,4 @@
-"""DB 생성 탭 — PDF→텍스트→Chunk→임베딩 통합 파이프라인."""
+"""DB 생성 탭 — PDF→Raw→Canonical→Chunk→임베딩 통합 파이프라인 (V3)."""
 
 from __future__ import annotations
 
@@ -27,18 +27,18 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QSpinBox,
     QDialog,
+    QListWidget,
+    QListWidgetItem,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QTabWidget,
 )
 
 import fitz
 
-from src.core.extract_pymupdf import extract_lines
-from src.core.line_rebuild import rebuild_lines
-from src.core.normalize import normalize_lines
-from src.core.table_figure_filter import apply_table_figure_filter
-from src.core.equation_filter import apply_equation_filter
-from src.core.parse_state_machine import parse_lines
+from src.core.extract_pdf_raw import extract_raw
+from src.core.rule_marine_regulation import map_to_canonical
 from src.core.export_jsonl import (
-    write_jsonl,
     write_records_jsonl,
     load_jsonl,
 )
@@ -92,27 +92,31 @@ def _render_page_to_pixmap(pdf_path: str | Path, page_no: int, dpi_scale: float 
 
 
 class ReviewDialog(QDialog):
-    """검수 창 — PDF·JSONL 뷰, 수정·저장 후 닫기."""
+    """검수 창 — Raw / Canonical 탭, PDF + bbox 하이라이트 (V3)."""
 
     def __init__(
         self,
         pdf_path: str,
+        raw_blocks: list[dict],
+        canonical_records: list,
         jsonl_path: str,
-        records: list[dict],
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._pdf_path = pdf_path
+        self._raw_blocks = raw_blocks
+        self._canonical_records = canonical_records
         self._jsonl_path = jsonl_path
-        self._records = records
-        self._current_index = 0
+        self._current_raw_index = 0
+        self._current_canonical_index = 0
         self._current_pixmap: QPixmap | None = None
 
-        self.setWindowTitle("검수 — PDF·JSONL")
-        self.setMinimumSize(900, 600)
-        self.resize(1100, 700)
+        self.setWindowTitle("검수 — Raw / Canonical (V3)")
+        self.setMinimumSize(1100, 700)
+        self.resize(1400, 800)
 
         layout = QVBoxLayout(self)
+        self._tab_widget = QTabWidget()
         nav_layout = QHBoxLayout()
         self._label_progress = QLabel("— / —")
         self._label_progress.setStyleSheet("font-weight: bold; min-width: 100px;")
@@ -128,55 +132,147 @@ class ReviewDialog(QDialog):
         QShortcut(QKeySequence(Qt.Key_Left), self, self._go_prev, context=Qt.WidgetWithChildrenShortcut)
         QShortcut(QKeySequence(Qt.Key_Right), self, self._go_next, context=Qt.WidgetWithChildrenShortcut)
 
-        splitter = QSplitter(Qt.Horizontal)
-        left_w = QWidget()
-        left_lay = QVBoxLayout(left_w)
-        left_lay.setContentsMargins(0, 0, 0, 0)
+        # Raw 검수 탭
+        raw_tab = QWidget()
+        raw_layout = QVBoxLayout(raw_tab)
+        splitter_raw = QSplitter(Qt.Horizontal)
+        left_raw = QWidget()
+        left_raw_lay = QVBoxLayout(left_raw)
+        left_raw_lay.setContentsMargins(0, 0, 0, 0)
         self._scroll_pdf = QScrollArea()
         self._scroll_pdf.setWidgetResizable(True)
         self._scroll_pdf.setFrameShape(QFrame.NoFrame)
         self._label_pdf_view = QLabel()
         self._label_pdf_view.setAlignment(Qt.AlignCenter)
-        self._label_pdf_view.setMinimumSize(320, 450)
+        self._label_pdf_view.setMinimumSize(400, 500)
         self._label_pdf_view.setStyleSheet("background-color: #f0f0f0; color: #666;")
         self._label_pdf_view.setText("PDF 페이지")
         self._scroll_pdf.setWidget(self._label_pdf_view)
         self._scroll_pdf.viewport().installEventFilter(self)
-        left_lay.addWidget(self._scroll_pdf)
-        splitter.addWidget(left_w)
+        left_raw_lay.addWidget(self._scroll_pdf)
+        splitter_raw.addWidget(left_raw)
 
-        right_w = QWidget()
-        right_lay = QVBoxLayout(right_w)
-        right_lay.addWidget(QLabel("현재 라인 (편집 가능)"))
-        form = QFormLayout()
-        self._field_doc_id = QLineEdit()
-        self._field_doc_id.setReadOnly(True)
-        self._field_content_page = QLineEdit()
-        self._field_content_page.setReadOnly(True)
-        self._field_page = QLineEdit()
-        self._field_page.setReadOnly(True)
-        self._field_path = QPlainTextEdit()
-        self._field_path.setMinimumHeight(100)
-        self._field_text = QPlainTextEdit()
-        self._field_text.setMinimumHeight(150)
-        form.addRow("doc_id:", self._field_doc_id)
-        form.addRow("page (문서):", self._field_content_page)
-        form.addRow("  PDF 물리:", self._field_page)
-        form.addRow("path:", self._field_path)
-        form.addRow("text:", self._field_text)
-        right_lay.addLayout(form)
+        right_raw = QWidget()
+        right_raw_lay = QVBoxLayout(right_raw)
+        right_raw_lay.addWidget(QLabel("Raw 블록 목록"))
+        self._list_raw = QListWidget()
+        self._list_raw.setMinimumHeight(200)
+        self._list_raw.currentRowChanged.connect(self._on_raw_row_changed)
+        right_raw_lay.addWidget(self._list_raw)
+        form_raw = QFormLayout()
+        self._field_raw_block_id = QLineEdit()
+        self._field_raw_block_id.setReadOnly(True)
+        self._field_raw_page = QLineEdit()
+        self._field_raw_page.setReadOnly(True)
+        self._field_raw_block_type = QLineEdit()
+        self._field_raw_block_type.setReadOnly(True)
+        self._field_raw_text = QPlainTextEdit()
+        self._field_raw_text.setMinimumHeight(120)
+        self._field_raw_text.setReadOnly(True)
+        form_raw.addRow("block_id:", self._field_raw_block_id)
+        form_raw.addRow("page:", self._field_raw_page)
+        form_raw.addRow("block_type:", self._field_raw_block_type)
+        form_raw.addRow("text:", self._field_raw_text)
+        right_raw_lay.addLayout(form_raw)
+        splitter_raw.addWidget(right_raw)
+        splitter_raw.setSizes([550, 450])
+        raw_layout.addWidget(splitter_raw)
+        self._tab_widget.addTab(raw_tab, "Raw")
+
+        # Canonical 검수 탭
+        canon_tab = QWidget()
+        canon_layout = QVBoxLayout(canon_tab)
+        splitter_canon = QSplitter(Qt.Horizontal)
+        left_canon = QWidget()
+        left_canon_lay = QVBoxLayout(left_canon)
+        left_canon_lay.addWidget(QLabel("Canonical 계층 구조"))
+        self._tree_canonical = QTreeWidget()
+        self._tree_canonical.setHeaderLabels(["구조", "텍스트 미리보기"])
+        self._tree_canonical.setMinimumHeight(300)
+        self._tree_canonical.itemSelectionChanged.connect(self._on_canonical_item_changed)
+        left_canon_lay.addWidget(self._tree_canonical)
+        splitter_canon.addWidget(left_canon)
+
+        right_canon = QWidget()
+        right_canon_lay = QVBoxLayout(right_canon)
+        right_canon_lay.addWidget(QLabel("선택 항목 상세"))
+        form_canon = QFormLayout()
+        self._field_canon_structure_path = QLineEdit()
+        self._field_canon_structure_path.setReadOnly(True)
+        self._field_canon_page = QLineEdit()
+        self._field_canon_page.setReadOnly(True)
+        self._field_canon_text = QPlainTextEdit()
+        self._field_canon_text.setMinimumHeight(150)
+        self._field_canon_text.setReadOnly(True)
+        form_canon.addRow("structure_path:", self._field_canon_structure_path)
+        form_canon.addRow("physical_page:", self._field_canon_page)
+        form_canon.addRow("content.text:", self._field_canon_text)
+        right_canon_lay.addLayout(form_canon)
+        splitter_canon.addWidget(right_canon)
+        splitter_canon.setSizes([450, 450])
+        canon_layout.addWidget(splitter_canon)
+        self._tab_widget.addTab(canon_tab, "Canonical")
+
+        layout.addWidget(self._tab_widget, 1)
+
         btn_row = QHBoxLayout()
         self._btn_save_close = QPushButton("저장 후 닫기")
         self._btn_save_close.clicked.connect(self._on_save_and_close)
         btn_row.addWidget(self._btn_save_close)
         btn_row.addStretch()
-        right_lay.addLayout(btn_row)
-        splitter.addWidget(right_w)
-        splitter.setSizes([500, 450])
-        layout.addWidget(splitter, 1)
+        layout.addLayout(btn_row)
 
+        self._populate_raw_list()
+        self._populate_canonical_tree()
+        if self._raw_blocks:
+            self._list_raw.setCurrentRow(0)
+        if self._canonical_records:
+            self._tree_canonical.setCurrentItem(self._tree_canonical.topLevelItem(0))
         self._refresh_all()
         self._update_nav_state()
+
+    def _populate_raw_list(self) -> None:
+        self._list_raw.clear()
+        for i, blk in enumerate(self._raw_blocks):
+            page = blk.get("page", "")
+            btype = blk.get("block_type", "text")
+            text = (blk.get("text") or "")[:80]
+            if len((blk.get("text") or "")) > 80:
+                text += "..."
+            item = QListWidgetItem(f"[{i+1}] p.{page} {btype}: {text}")
+            item.setData(Qt.ItemDataRole.UserRole, i)
+            self._list_raw.addItem(item)
+
+    def _populate_canonical_tree(self) -> None:
+        self._tree_canonical.clear()
+        from src.rag.citation_formatter import format_citation
+        for i, rec in enumerate(self._canonical_records):
+            d = rec.to_dict() if hasattr(rec, "to_dict") else rec
+            structure = d.get("structure") or []
+            content = d.get("content") or {}
+            text = (content.get("text") or "")[:60]
+            if len((content.get("text") or "")) > 60:
+                text += "..."
+            labels = [s.get("label", "") for s in structure if isinstance(s, dict)]
+            path_str = " > ".join(labels) if labels else "(없음)"
+            item = QTreeWidgetItem([path_str or f"레코드 {i+1}", text])
+            item.setData(0, Qt.ItemDataRole.UserRole, i)
+            self._tree_canonical.addTopLevelItem(item)
+
+    def _on_raw_row_changed(self, row: int) -> None:
+        if row >= 0 and row < len(self._raw_blocks):
+            self._current_raw_index = row
+            self._tab_widget.setCurrentIndex(0)
+            self._refresh_pdf_view()
+            self._refresh_raw_panel()
+
+    def _on_canonical_item_changed(self) -> None:
+        items = self._tree_canonical.selectedItems()
+        if items:
+            idx = items[0].data(0, Qt.ItemDataRole.UserRole)
+            if idx is not None and 0 <= idx < len(self._canonical_records):
+                self._current_canonical_index = idx
+                self._refresh_canonical_panel()
 
     def eventFilter(self, obj: QWidget, event: QEvent) -> bool:
         if obj is self._scroll_pdf.viewport() and event.type() == QEvent.Type.Resize:
@@ -197,14 +293,16 @@ class ReviewDialog(QDialog):
         self._label_pdf_view.setText("")
 
     def _refresh_pdf_view(self) -> None:
-        if not self._records or not (0 <= self._current_index < len(self._records)):
+        if self._tab_widget.currentIndex() != 0 or not self._raw_blocks:
+            return
+        if not (0 <= self._current_raw_index < len(self._raw_blocks)):
             page_no = 1
         else:
-            page_no = self._records[self._current_index].get("page") or 1
+            page_no = self._raw_blocks[self._current_raw_index].get("page") or 1
         pix = _render_page_to_pixmap(self._pdf_path, page_no)
         if pix is not None:
-            if self._records and 0 <= self._current_index < len(self._records):
-                bbox = self._records[self._current_index].get("bbox")
+            if 0 <= self._current_raw_index < len(self._raw_blocks):
+                bbox = self._raw_blocks[self._current_raw_index].get("bbox")
                 if isinstance(bbox, list) and len(bbox) >= 4:
                     _draw_bbox_on_pixmap(pix, bbox, dpi_scale=2.0)
             self._current_pixmap = pix
@@ -213,73 +311,88 @@ class ReviewDialog(QDialog):
             self._current_pixmap = None
             self._label_pdf_view.setText(f"페이지 {page_no} 로드 불가")
 
-    def _refresh_right_panel(self) -> None:
-        if not self._records or not (0 <= self._current_index < len(self._records)):
-            self._field_doc_id.clear()
-            self._field_content_page.clear()
-            self._field_page.clear()
-            self._field_path.clear()
-            self._field_text.clear()
+    def _refresh_raw_panel(self) -> None:
+        if not (0 <= self._current_raw_index < len(self._raw_blocks)):
             return
-        rec = self._records[self._current_index]
-        self._field_doc_id.setText(str(rec.get("doc_id", "")))
-        cp = rec.get("content_page", rec.get("page", ""))
-        self._field_content_page.setText(str(cp))
-        self._field_page.setText(str(rec.get("page", "")))
-        self._field_path.setPlainText(json.dumps(rec.get("path") or {}, ensure_ascii=False, indent=2))
-        self._field_text.setPlainText(str(rec.get("text", "")))
+        blk = self._raw_blocks[self._current_raw_index]
+        self._field_raw_block_id.setText(str(blk.get("block_id", "")))
+        self._field_raw_page.setText(str(blk.get("page", "")))
+        self._field_raw_block_type.setText(str(blk.get("block_type", "text")))
+        self._field_raw_text.setPlainText(str(blk.get("text", "")))
+
+    def _refresh_canonical_panel(self) -> None:
+        if not (0 <= self._current_canonical_index < len(self._canonical_records)):
+            return
+        rec = self._canonical_records[self._current_canonical_index]
+        d = rec.to_dict() if hasattr(rec, "to_dict") else rec
+        structure = d.get("structure") or []
+        content = d.get("content") or {}
+        labels = [s.get("label", "") for s in structure if isinstance(s, dict)]
+        self._field_canon_structure_path.setText(" > ".join(labels))
+        loc = d.get("location") or {}
+        self._field_canon_page.setText(str(loc.get("physical_page", "")))
+        self._field_canon_text.setPlainText(content.get("text", ""))
 
     def _refresh_all(self) -> None:
         self._refresh_pdf_view()
-        self._refresh_right_panel()
-
-    def _flush_current_to_record(self) -> None:
-        if not self._records or not (0 <= self._current_index < len(self._records)):
-            return
-        rec = self._records[self._current_index]
-        rec["text"] = self._field_text.toPlainText()
-        try:
-            path_text = self._field_path.toPlainText().strip()
-            if path_text:
-                rec["path"] = json.loads(path_text)
-        except json.JSONDecodeError:
-            pass
+        self._refresh_raw_panel()
+        self._refresh_canonical_panel()
 
     def _go_prev(self) -> None:
-        self._flush_current_to_record()
-        if self._current_index <= 0:
-            return
-        self._current_index -= 1
+        tab = self._tab_widget.currentIndex()
+        if tab == 0:
+            if self._current_raw_index <= 0:
+                return
+            self._current_raw_index -= 1
+            self._list_raw.setCurrentRow(self._current_raw_index)
+        else:
+            if self._current_canonical_index <= 0:
+                return
+            self._current_canonical_index -= 1
+            self._tree_canonical.setCurrentItem(self._tree_canonical.topLevelItem(self._current_canonical_index))
         self._refresh_all()
         self._update_nav_state()
 
     def _go_next(self) -> None:
-        self._flush_current_to_record()
-        if not self._records or self._current_index >= len(self._records) - 1:
-            return
-        self._current_index += 1
+        tab = self._tab_widget.currentIndex()
+        if tab == 0:
+            if not self._raw_blocks or self._current_raw_index >= len(self._raw_blocks) - 1:
+                return
+            self._current_raw_index += 1
+            self._list_raw.setCurrentRow(self._current_raw_index)
+        else:
+            if not self._canonical_records or self._current_canonical_index >= len(self._canonical_records) - 1:
+                return
+            self._current_canonical_index += 1
+            self._tree_canonical.setCurrentItem(self._tree_canonical.topLevelItem(self._current_canonical_index))
         self._refresh_all()
         self._update_nav_state()
 
     def _update_nav_state(self) -> None:
-        total = len(self._records)
+        tab = self._tab_widget.currentIndex()
+        if tab == 0:
+            total = len(self._raw_blocks)
+            idx = self._current_raw_index
+        else:
+            total = len(self._canonical_records)
+            idx = self._current_canonical_index
         if total == 0:
             self._label_progress.setText("— / —")
             self._btn_prev.setEnabled(False)
             self._btn_next.setEnabled(False)
             return
-        self._label_progress.setText(f"{self._current_index + 1} / {total}")
-        self._btn_prev.setEnabled(self._current_index > 0)
-        self._btn_next.setEnabled(self._current_index < total - 1)
+        self._label_progress.setText(f"{idx + 1} / {total}")
+        self._btn_prev.setEnabled(idx > 0)
+        self._btn_next.setEnabled(idx < total - 1)
 
     def _on_save_and_close(self) -> None:
-        self._flush_current_to_record()
-        if not self._records:
+        records = [r.to_dict() if hasattr(r, "to_dict") else r for r in self._canonical_records]
+        if not records:
             QMessageBox.information(self, "저장", "저장할 레코드가 없습니다.")
             return
         try:
-            n = write_records_jsonl(self._records, self._jsonl_path)
-            QMessageBox.information(self, "저장", f"저장했습니다. ({n}개 레코드)")
+            n = write_records_jsonl(records, self._jsonl_path)
+            QMessageBox.information(self, "저장", f"저장했습니다. ({n}개 Canonical 레코드)")
         except Exception as e:
             QMessageBox.critical(self, "저장 실패", str(e))
             return
@@ -291,38 +404,30 @@ class ExtractWorker(QObject):
     finished = Signal(list)
     error = Signal(str)
 
-    def __init__(self, pdf_path: str, after_toc: bool, exclude_header_footer: bool,
-                 y_tolerance: float, hyphen_merge: bool, table_caption_only: bool,
-                 figure_caption_only: bool, exclude_equation: bool, parent=None):
+    def __init__(self, pdf_path: str, doc_id: str, after_toc: bool, exclude_header_footer: bool,
+                 table_caption_only: bool, figure_caption_only: bool, exclude_equation: bool, parent=None):
         super().__init__(parent)
         self._pdf_path = pdf_path
+        self._doc_id = doc_id
         self._after_toc = after_toc
         self._exclude_header_footer = exclude_header_footer
-        self._y_tolerance = y_tolerance
-        self._hyphen_merge = hyphen_merge
         self._table_caption_only = table_caption_only
         self._figure_caption_only = figure_caption_only
         self._exclude_equation = exclude_equation
 
     def run(self) -> None:
         try:
-            raw = extract_lines(
+            blocks = extract_raw(
                 self._pdf_path,
+                doc_id=self._doc_id or "",
                 after_toc=self._after_toc,
                 exclude_header_footer=self._exclude_header_footer,
+                table_caption_only=self._table_caption_only,
+                figure_caption_only=self._figure_caption_only,
+                exclude_equation=self._exclude_equation,
                 progress_callback=lambda c, t: self.progress.emit(c, t),
             )
-            rebuilt = rebuild_lines(raw, y_tolerance=self._y_tolerance, hyphen_merge=self._hyphen_merge)
-            lines = normalize_lines(rebuilt)
-            if self._table_caption_only or self._figure_caption_only:
-                lines = apply_table_figure_filter(
-                    lines,
-                    table_caption_only=self._table_caption_only,
-                    figure_caption_only=self._figure_caption_only,
-                )
-            if self._exclude_equation:
-                lines = apply_equation_filter(lines, exclude_equation=True)
-            self.finished.emit(lines)
+            self.finished.emit(blocks)
         except Exception as e:
             self.error.emit(str(e))
 
@@ -420,13 +525,14 @@ def _save_docs_meta(output_dir: str | Path, doc_id: str, content_start_pdf_page:
 
 
 class TabDBCreate(QWidget):
-    """DB 생성 탭 — Import → Extract → Parse → 검수 → Chunk → 임베딩 통합 파이프라인."""
+    """DB 생성 탭 — Import → Raw 추출 → Canonical 변환 → 검수 → Chunk → 임베딩 (V3)."""
 
     def __init__(self, app_state: dict | None = None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._state = app_state or {}
         self._jsonl_path: str = ""
-        self._records: list[dict] = []
+        self._raw_blocks: list[dict] = []
+        self._canonical_records: list = []
         self._extract_thread: QThread | None = None
         self._extract_worker: ExtractWorker | None = None
         self._embedding_thread: QThread | None = None
@@ -471,8 +577,8 @@ class TabDBCreate(QWidget):
         imp_layout.addWidget(self._check_after_toc)
         layout.addWidget(group_import)
 
-        # 2. Extract
-        group_extract = QGroupBox("2. Extract — 텍스트 추출")
+        # 2. Raw 추출
+        group_extract = QGroupBox("2. Raw 추출 — PDF → Raw JSONL")
         ext_layout = QVBoxLayout(group_extract)
         row_opts = QHBoxLayout()
         self._check_header_footer = QCheckBox("머릿말/꼬리말 제외")
@@ -500,27 +606,44 @@ class TabDBCreate(QWidget):
         self._progress_extract = QProgressBar()
         self._progress_extract.setVisible(False)
         ext_layout.addWidget(self._progress_extract)
+        ext_layout.addWidget(QLabel("Raw 미리보기 (block_id, page, block_type, text):"))
+        self._list_raw_preview = QListWidget()
+        self._list_raw_preview.setMaximumHeight(150)
+        ext_layout.addWidget(self._list_raw_preview)
         layout.addWidget(group_extract)
 
-        # 3. Parse
-        group_parse = QGroupBox("3. Parse — 구조 태깅")
-        parse_layout = QHBoxLayout(group_parse)
-        self._btn_parse = QPushButton("Path 태깅 실행")
+        # 3. Canonical 변환
+        group_parse = QGroupBox("3. Canonical 변환 — Raw → Canonical")
+        parse_layout = QVBoxLayout(group_parse)
+        row_parse_btn = QHBoxLayout()
+        self._btn_parse = QPushButton("변환 실행")
         self._btn_parse.clicked.connect(self._on_parse)
-        self._label_parse = QLabel("Extract 후 실행하세요.")
+        self._label_parse = QLabel("Raw 추출 후 실행하세요.")
         self._label_parse.setStyleSheet("color: #666;")
-        parse_layout.addWidget(self._btn_parse)
-        parse_layout.addWidget(self._label_parse, 1)
+        row_parse_btn.addWidget(self._btn_parse)
+        row_parse_btn.addWidget(self._label_parse, 1)
+        parse_layout.addLayout(row_parse_btn)
+        parse_layout.addWidget(QLabel("Canonical 미리보기 (선택 시 우측에 상세 표시):"))
+        parse_split = QSplitter(Qt.Horizontal)
+        self._tree_canonical_preview = QTreeWidget()
+        self._tree_canonical_preview.setHeaderLabels(["구조", "텍스트 미리보기"])
+        self._tree_canonical_preview.setMinimumHeight(120)
+        self._tree_canonical_preview.itemSelectionChanged.connect(self._on_canonical_preview_selected)
+        parse_split.addWidget(self._tree_canonical_preview)
+        self._field_canonical_detail = QPlainTextEdit()
+        self._field_canonical_detail.setMinimumHeight(120)
+        self._field_canonical_detail.setReadOnly(True)
+        self._field_canonical_detail.setPlaceholderText("선택 항목: structure_path, physical_page, content.text")
+        parse_split.addWidget(self._field_canonical_detail)
+        parse_split.setSizes([300, 250])
+        parse_layout.addWidget(parse_split)
         layout.addWidget(group_parse)
 
         # 4. Export + 검수
         group_export = QGroupBox("4. Export & 검수")
         exp_layout = QVBoxLayout(group_export)
         row_exp = QHBoxLayout()
-        self._check_merge_para = QCheckBox("Paragraph 단위 합치기")
-        self._check_merge_para.setChecked(True)
-        row_exp.addWidget(self._check_merge_para)
-        self._btn_export = QPushButton("JSONL 저장")
+        self._btn_export = QPushButton("Canonical JSONL 저장")
         self._btn_export.clicked.connect(self._on_export)
         row_exp.addWidget(self._btn_export)
         self._btn_open_review = QPushButton("검수 열기")
@@ -531,7 +654,7 @@ class TabDBCreate(QWidget):
         row_exp.addWidget(self._btn_open_review)
         row_exp.addStretch()
         exp_layout.addLayout(row_exp)
-        self._label_export = QLabel("Parse 후 JSONL 저장하세요.")
+        self._label_export = QLabel("Canonical 변환 후 JSONL 저장하세요.")
         self._label_export.setStyleSheet("color: #666;")
         exp_layout.addWidget(self._label_export)
         layout.addWidget(group_export)
@@ -673,11 +796,11 @@ class TabDBCreate(QWidget):
 
     def _update_step_states(self) -> None:
         paths = self._state.get("pdf_paths", [])
-        extract_lines_list = self._state.get("extract_lines", [])
-        parsed = self._state.get("parsed_lines", [])
+        raw_blocks = self._state.get("raw_blocks", [])
+        canonical = self._state.get("canonical_records", [])
         self._btn_extract.setEnabled(bool(paths))
-        self._btn_parse.setEnabled(bool(extract_lines_list))
-        self._btn_export.setEnabled(bool(parsed))
+        self._btn_parse.setEnabled(bool(raw_blocks))
+        self._btn_export.setEnabled(bool(canonical))
 
     def _on_select_pdf(self) -> None:
         start = _default_data_dir()
@@ -711,12 +834,12 @@ class TabDBCreate(QWidget):
         self._progress_extract.setRange(0, 0)
         self._label_extract.setText("추출 중…")
 
+        doc_id = self._edit_doc_id.text().strip() or _doc_id_from_path(paths[0])
         self._extract_worker = ExtractWorker(
             paths[0],
+            doc_id,
             self._state["after_toc"],
             self._check_header_footer.isChecked(),
-            2.0,
-            False,
             self._check_table.isChecked(),
             self._check_figure.isChecked(),
             self._check_equation.isChecked(),
@@ -736,12 +859,23 @@ class TabDBCreate(QWidget):
             self._progress_extract.setMaximum(tot)
             self._progress_extract.setValue(cur)
 
-    def _on_extract_finished(self, lines: list) -> None:
-        self._state["extract_lines"] = lines
+    def _on_extract_finished(self, blocks: list) -> None:
+        self._state["raw_blocks"] = blocks
+        self._raw_blocks = blocks
         self._btn_extract.setEnabled(True)
         self._progress_extract.setVisible(False)
-        n = len(lines)
-        self._label_extract.setText(f"완료: {n}줄 추출됨.")
+        n = len(blocks)
+        self._label_extract.setText(f"완료: {n}개 Raw 블록 추출됨.")
+        self._list_raw_preview.clear()
+        for i, blk in enumerate(blocks[:100]):  # 최대 100개 미리보기
+            page = blk.get("page", "")
+            btype = blk.get("block_type", "text")
+            text = (blk.get("text") or "")[:50]
+            if len((blk.get("text") or "")) > 50:
+                text += "..."
+            self._list_raw_preview.addItem(QListWidgetItem(f"[{i+1}] p.{page} {btype}: {text}"))
+        if len(blocks) > 100:
+            self._list_raw_preview.addItem(QListWidgetItem(f"... 외 {len(blocks)-100}개"))
         self._update_step_states()
 
     def _on_extract_error(self, msg: str) -> None:
@@ -750,80 +884,101 @@ class TabDBCreate(QWidget):
         self._label_extract.setText(f"오류: {msg}")
 
     def _on_parse(self) -> None:
-        lines = self._state.get("extract_lines", [])
-        if not lines:
-            self._label_parse.setText("Extract를 먼저 실행하세요.")
+        raw_blocks = self._state.get("raw_blocks", [])
+        if not raw_blocks:
+            self._label_parse.setText("Raw 추출을 먼저 실행하세요.")
             return
-        parsed = parse_lines(lines)
-        self._state["parsed_lines"] = parsed
-        self._label_parse.setText(f"완료: {len(parsed)}개 라인 path 부여.")
+        pdf_paths = self._state.get("pdf_paths", [])
+        source_file = Path(pdf_paths[0]).name if pdf_paths else "unknown.pdf"
+        source_meta = {"file_name": source_file}
+        canonical = map_to_canonical(raw_blocks, source_meta)
+        self._state["canonical_records"] = canonical
+        self._canonical_records = canonical
+        self._label_parse.setText(f"완료: {len(canonical)}개 Canonical 레코드 변환.")
+        self._tree_canonical_preview.clear()
+        for i, rec in enumerate(canonical[:80]):
+            d = rec.to_dict()
+            structure = d.get("structure") or []
+            content = d.get("content") or {}
+            text = (content.get("text") or "")[:40]
+            if len((content.get("text") or "")) > 40:
+                text += "..."
+            labels = [s.get("label", "") for s in structure if isinstance(s, dict)]
+            path_str = " > ".join(labels) if labels else "(없음)"
+            item = QTreeWidgetItem([path_str or f"레코드 {i+1}", text])
+            item.setData(0, Qt.ItemDataRole.UserRole, i)
+            self._tree_canonical_preview.addTopLevelItem(item)
+        if len(canonical) > 80:
+            self._tree_canonical_preview.addTopLevelItem(QTreeWidgetItem([f"... 외 {len(canonical)-80}개", ""]))
         self._update_step_states()
 
+    def _on_canonical_preview_selected(self) -> None:
+        items = self._tree_canonical_preview.selectedItems()
+        if not items or not self._canonical_records:
+            self._field_canonical_detail.clear()
+            return
+        idx = items[0].data(0, Qt.ItemDataRole.UserRole)
+        if idx is None or not (0 <= idx < len(self._canonical_records)):
+            return
+        rec = self._canonical_records[idx]
+        d = rec.to_dict()
+        structure = d.get("structure") or []
+        content = d.get("content") or {}
+        loc = d.get("location") or {}
+        labels = [s.get("label", "") for s in structure]
+        lines = [
+            "structure_path: " + (" > ".join(labels) if labels else "(없음)"),
+            "physical_page: " + str(loc.get("physical_page", "")),
+            "content.text: " + (content.get("text", "")[:200] or ""),
+        ]
+        if len(content.get("text", "")) > 200:
+            lines[-1] += "..."
+        self._field_canonical_detail.setPlainText("\n".join(lines))
+
     def _on_export(self) -> None:
-        parsed = self._state.get("parsed_lines", [])
-        if not parsed:
-            self._label_export.setText("Parse를 먼저 실행하세요.")
+        canonical = self._state.get("canonical_records", [])
+        if not canonical:
+            self._label_export.setText("Canonical 변환을 먼저 실행하세요.")
             return
         doc_id = (self._state.get("doc_id") or "").strip() or "export"
         output_dir = Path(self._edit_output.text().strip() or _default_output_dir(self._state))
         output_dir.mkdir(parents=True, exist_ok=True)
-        pdf_paths = self._state.get("pdf_paths", [])
-        source_file = Path(pdf_paths[0]).name if pdf_paths else "unknown.pdf"
         out_path = output_dir / f"{doc_id}.jsonl"
         try:
-            count = write_jsonl(
-                parsed,
-                out_path,
-                doc_id=doc_id,
-                source_file=source_file,
-                merge_by_paragraph=self._check_merge_para.isChecked(),
-            )
+            records = [r.to_dict() if hasattr(r, "to_dict") else r for r in canonical]
+            count = write_records_jsonl(records, out_path)
             self._jsonl_path = str(out_path)
-            self._records = load_jsonl(out_path)
-            self._current_index = 0
-            self._label_export.setText(f"저장 완료: {out_path} ({count}행)")
+            self._label_export.setText(f"저장 완료: {out_path} ({count}개 Canonical 레코드)")
             self._edit_chunk_input.setText(self._jsonl_path)
         except Exception as e:
             self._label_export.setText(f"저장 실패: {e}")
             return
 
     def _on_open_review(self) -> None:
-        """검수 창 열기. JSONL·PDF 선택 → 언제든 이어서 검수 가능."""
-        out_dir = self._edit_output.text().strip() or _default_output_dir(self._state)
-        jsonl_default = self._jsonl_path or out_dir
-        jsonl_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "JSONL 파일 선택 (검수용)",
-            jsonl_default,
-            "JSONL (*.jsonl);;모든 파일 (*)",
+        """검수 창 열기 — Raw/Canonical 탭, bbox 하이라이트."""
+        raw_blocks = self._state.get("raw_blocks", [])
+        canonical = self._state.get("canonical_records", [])
+        pdf_paths = self._state.get("pdf_paths", [])
+        if not pdf_paths or not Path(pdf_paths[0]).exists():
+            QMessageBox.warning(self, "검수", "PDF를 먼저 선택하세요.")
+            return
+        pdf_path = pdf_paths[0]
+        if not raw_blocks or not canonical:
+            QMessageBox.warning(self, "검수", "Raw 추출 및 Canonical 변환을 먼저 실행하세요.")
+            return
+        jsonl_path = self._jsonl_path or str(
+            Path(self._edit_output.text().strip() or _default_output_dir(self._state))
+            / f"{(self._state.get('doc_id') or 'export').strip() or 'export'}.jsonl"
         )
-        if not jsonl_path:
-            return
-        data_dir = _default_data_dir()
-        pdf_paths = self._state.get("pdf_paths") or []
-        pdf_start = str(Path(pdf_paths[0]).parent) if pdf_paths and Path(pdf_paths[0]).exists() else data_dir
-        pdf_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "PDF 파일 선택 (해당 원본)",
-            pdf_start,
-            "PDF (*.pdf);;모든 파일 (*)",
-        )
-        if not pdf_path:
-            return
-        records = load_jsonl(jsonl_path)
-        if not records:
-            QMessageBox.warning(self, "검수", "JSONL에 레코드가 없습니다.")
-            return
         dlg = ReviewDialog(
             pdf_path=pdf_path,
+            raw_blocks=raw_blocks,
+            canonical_records=canonical,
             jsonl_path=jsonl_path,
-            records=records,
             parent=self,
         )
-        dlg.exec()
-        # 검수 후 파이프라인 상태 동기화 (이어서 Chunk 등 진행 시)
-        self._jsonl_path = jsonl_path
-        self._records = records
+        if dlg.exec():
+            self._canonical_records = [r for r in canonical]  # 검수에서 수정 가능 시 반영
         if not self._edit_chunk_input.text().strip():
             self._edit_chunk_input.setText(jsonl_path)
 

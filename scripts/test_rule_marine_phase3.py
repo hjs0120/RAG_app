@@ -7,7 +7,7 @@
 2. CanonicalRecord.structure에 chapter/section/article/paragraph 계층 확인
 3. canonical_validator.validate() 통과
 4. citation_formatter.format_citation() 출력 형태 확인
-5. V2 parse_state_machine 결과와 구조 비교
+5. (V2 parse_state_machine은 Phase 6에서 삭제됨 — 비교 생략)
 """
 
 import sys
@@ -19,12 +19,6 @@ sys.path.insert(0, str(ROOT))
 from src.core.extract_pdf_raw import extract_raw
 from src.core.rule_marine_regulation import map_to_canonical
 from src.core.canonical_validator import validate as canonical_validate
-from src.core.parse_state_machine import parse_lines
-from src.core.extract_pymupdf import extract_lines
-from src.core.line_rebuild import rebuild_lines
-from src.core.normalize import normalize_lines
-from src.core.table_figure_filter import apply_table_figure_filter
-from src.core.equation_filter import apply_equation_filter
 
 import importlib.util
 _spec = importlib.util.spec_from_file_location(
@@ -97,24 +91,8 @@ def main() -> None:
     else:
         print("  [INFO] citation 형태 확인")
 
-    # 5. V2 parse_state_machine과 구조 비교
-    print("\n[5] V2 parse_state_machine 결과와 비교")
-    v2_raw = extract_lines(pdf_path, after_toc=True, exclude_header_footer=True)
-    v2_rebuilt = rebuild_lines(v2_raw, y_tolerance=2.0, hyphen_merge=False)
-    v2_norm = normalize_lines(v2_rebuilt)
-    v2_filtered = apply_table_figure_filter(v2_norm, table_caption_only=True, figure_caption_only=True)
-    v2_filtered = apply_equation_filter(v2_filtered, exclude_equation=True)
-    v2_parsed = parse_lines(v2_filtered)
-
-    v2_chapters = set()
-    v2_articles = set()
-    for r in v2_parsed[:200]:
-        p = r.get("path") or {}
-        if p.get("chapter"):
-            v2_chapters.add(p["chapter"])
-        if p.get("article"):
-            v2_articles.add(p["article"])
-
+    # 5. (V2 비교 생략 — parse_state_machine은 Phase 6에서 삭제됨)
+    print("\n[5] Canonical 구조 통계")
     canon_chapters = set()
     canon_articles = set()
     for r in canonical_records[:200]:
@@ -123,16 +101,7 @@ def main() -> None:
                 canon_chapters.add(s.label)
             if s.type == "article":
                 canon_articles.add(s.label)
-
-    print(f"  V2 chapter 수: {len(v2_chapters)}, Canonical: {len(canon_chapters)}")
-    print(f"  V2 article 수: {len(v2_articles)}, Canonical: {len(canon_articles)}")
-    overlap_ch = len(v2_chapters & canon_chapters)
-    overlap_art = len(v2_articles & canon_articles)
-    print(f"  chapter 공통: {overlap_ch}, article 공통: {overlap_art}")
-    if overlap_ch >= len(v2_chapters) * 0.8 and overlap_art >= len(v2_articles) * 0.8:
-        print("  [OK] V2와 구조 대략 일치")
-    else:
-        print("  [INFO] 형식 차이로 일부 불일치 가능 (제 101조 vs 101 등)")
+    print(f"  chapter 수: {len(canon_chapters)}, article 수: {len(canon_articles)}")
 
     print("\n" + "=" * 60)
     print("Phase 3 수동 검증 완료")

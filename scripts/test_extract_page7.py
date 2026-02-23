@@ -2,22 +2,17 @@
 
 실행: python scripts/test_extract_page7.py
 (PDF는 data/ 폴더 또는 프로젝트 루트에 두세요.)
+V3: extract_pdf_raw + rule_marine_regulation 사용.
 """
 
 import sys
 from pathlib import Path
 
-# 프로젝트 루트
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from src.core.extract_pymupdf import extract_lines
-from src.core.line_rebuild import rebuild_lines
-from src.core.normalize import normalize_lines
-from src.core.parse_state_machine import parse_lines
-from src.core.table_figure_filter import apply_table_figure_filter
-from src.core.equation_filter import apply_equation_filter
-from src.core.export_jsonl import merge_paragraphs, build_record
+from src.core.extract_pdf_raw import extract_raw
+from src.core.rule_marine_regulation import map_to_canonical
 
 
 def main() -> None:
@@ -34,63 +29,45 @@ def main() -> None:
     print(f"PDF: {pdf_path.name}")
     print("=" * 60)
 
-    # 1. Extract (after_toc=True, exclude_header_footer=True)
-    raw = extract_lines(
+    # V3: Raw 추출
+    raw_blocks = extract_raw(
         pdf_path,
+        doc_id="MOUS_RULE_2024",
         after_toc=True,
         exclude_header_footer=True,
+        table_caption_only=True,
+        figure_caption_only=True,
+        exclude_equation=True,
     )
-    print(f"1. Extract (raw): {len(raw)} lines")
+    print(f"1. Raw 추출: {len(raw_blocks)} blocks")
 
-    # 2. Rebuild
-    rebuilt = rebuild_lines(raw, y_tolerance=2.0, hyphen_merge=False)
-    print(f"2. Rebuild: {len(rebuilt)} lines")
-
-    # 3. Normalize
-    lines = normalize_lines(rebuilt)
-    print(f"3. Normalize: {len(lines)} lines")
-
-    # 4. Filters
-    lines = apply_table_figure_filter(
-        lines, table_caption_only=True, figure_caption_only=True
-    )
-    lines = apply_equation_filter(lines, exclude_equation=True)
-    print(f"4. After filters: {len(lines)} lines")
-
-    # 5. Parse
-    parsed = parse_lines(lines)
-    print(f"5. Parse: {len(parsed)} lines")
-
-    # 6. Merge paragraphs (Export와 동일)
-    merged = merge_paragraphs(parsed)
-    print(f"6. Merge paragraphs: {len(merged)} records")
+    # Canonical 변환
+    source_meta = {"file_name": pdf_path.name}
+    canonical = map_to_canonical(raw_blocks, source_meta)
+    print(f"2. Canonical 변환: {len(canonical)} records")
     print()
 
-    # 첫 본문 페이지 = content_start
-    content_start = parsed[0].get("page") if parsed else None
-    print(f"Content start (첫 본문 PDF 페이지): {content_start}")
-    print()
-
-    # page 7 (물리) 레코드만 필터
-    page7 = [m for m in merged if m.get("page") == 7]
+    # page 7 레코드만 필터
+    page7 = [r for r in canonical if r.location and r.location.physical_page == 7]
     print(f"물리 7페이지 레코드 수: {len(page7)}")
     print()
 
     # 상위 20개 출력
-    to_show = page7[:20] if page7 else merged[:20]
-    print("--- 물리 7페이지 상위 레코드 (text, path.chapter, path.section, path.article) ---")
+    to_show = page7[:20] if page7 else canonical[:20]
+    print("--- 물리 7페이지 상위 레코드 ---")
     for i, rec in enumerate(to_show):
-        path = rec.get("path") or {}
-        text_preview = (rec.get("text") or "")[:60].replace("\n", " ")
-        if len(rec.get("text") or "") > 60:
+        struct_str = " > ".join(s.label for s in rec.structure) if rec.structure else "(없음)"
+        text_preview = (rec.content.text or "")[:60].replace("\n", " ")
+        if len(rec.content.text or "") > 60:
             text_preview += "..."
-        print(f"[{i+1}] page={rec.get('page')} line_no={rec.get('line_no')}")
-        print(f"    path: ch={path.get('chapter')} sec={path.get('section')} art={path.get('article')} para={path.get('paragraph')}")
+        page_no = rec.location.physical_page if rec.location else "?"
+        print(f"[{i+1}] page={page_no}")
+        print(f"    structure: {struct_str}")
         print(f"    text: {text_preview}")
         print()
 
     # 검증: 제 1 장 총칙, 제 1 절 일반사항, 101. 적용 포함 여부
-    texts = [r.get("text", "") for r in page7]
+    texts = [r.content.text or "" for r in page7]
     has_chapter = any("제 1 장" in t or "제1장" in t for t in texts)
     has_chapter_total = any("총칙" in t for t in texts)
     has_section = any("제 1 절" in t or "제1절" in t for t in texts)

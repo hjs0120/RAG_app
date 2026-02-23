@@ -59,7 +59,7 @@ python scripts/test_rag_canonical_phase5.py
 | 3 | Raw → Canonical 변환 규칙 (`rule_marine_regulation.py`) | [x] |
 | 4 | Chunk 모듈 Canonical 기반으로 수정 (`chunk_builder.py`) | [x] |
 | 5 | FAISS 연동 및 RAG 파이프라인 출처 표기 개선 | [x] |
-| 6 | DB 생성 탭 UI 확장 — Raw/Canonical 미리보기 + 검수 기능 | [ ] |
+| 6 | DB 생성 탭 UI 확장 — Raw/Canonical 미리보기 + 검수 기능 | [x] |
 | 7 | V3 통합 검증 및 문서화 | [ ] |
 
 각 Phase의 **진도 체크** 항목을 검증 후 `[ ]` → `[x]`로 바꾸고, 위 표의 완료도 필요 시 ☑로 갱신하면 된다.
@@ -514,16 +514,16 @@ DB 생성 탭을 V3 파이프라인에 맞게 확장한다. Raw JSONL 미리보�
 
 ### 진도 체크
 
-- [ ] `tab_db_create.py` Extract 단계 → `extract_pdf_raw.py` 교체
-- [ ] `tab_db_create.py` Parse 단계 → `rule_marine_regulation.py` 교체
-- [ ] Raw JSONL 미리보기 리스트 구현
-- [ ] Canonical Tree View 미리보기 구현
-- [ ] `ReviewDialog` Raw 검수 탭 (bbox 하이라이트) 구현
-- [ ] `ReviewDialog` Canonical 검수 탭 구현
-- [ ] UI 시각적 확장 (FHD 기준, 텍스트 영역 확대)
-- [ ] `extract_pymupdf.py` 삭제
-- [ ] `parse_state_machine.py` 삭제
-- [ ] 수동 검증 완료
+- [x] `tab_db_create.py` Extract 단계 → `extract_pdf_raw.py` 교체
+- [x] `tab_db_create.py` Parse 단계 → `rule_marine_regulation.py` 교체
+- [x] Raw JSONL 미리보기 리스트 구현
+- [x] Canonical Tree View 미리보기 구현
+- [x] `ReviewDialog` Raw 검수 탭 (bbox 하이라이트) 구현
+- [x] `ReviewDialog` Canonical 검수 탭 구현
+- [x] UI 시각적 확장 (FHD 기준, 텍스트 영역 확대)
+- [x] `extract_pymupdf.py` 삭제
+- [x] `parse_state_machine.py` 삭제
+- [x] 수동 검증 완료
 
 ### Phase 6 완료 시 커밋
 

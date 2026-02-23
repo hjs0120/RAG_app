@@ -6,7 +6,7 @@
 1. extract_raw() 실행 -> bbox, style.font_size, block_id 포함
 2. after_toc 옵션 동작 확인
 3. raw_validator.validate() 통과
-4. V2 extract_pymupdf 결과와 텍스트 비교 (누락 없음)
+4. (V2 extract_pymupdf는 Phase 6에서 삭제됨 — 비교 생략)
 """
 
 import sys
@@ -17,12 +17,6 @@ sys.path.insert(0, str(ROOT))
 
 from src.core.extract_pdf_raw import extract_raw
 from src.core.raw_validator import validate as raw_validate
-from src.core.extract_pymupdf import extract_lines
-from src.core.line_rebuild import rebuild_lines
-from src.core.normalize import normalize_lines
-from src.core.table_figure_filter import apply_table_figure_filter
-from src.core.equation_filter import apply_equation_filter
-from src.core.toc_detector import apply_toc_filter
 
 
 def main() -> None:
@@ -88,27 +82,10 @@ def main() -> None:
         blocks_no_toc = extract_raw(pdf_path, doc_id="MOUS_RULE_2024", after_toc=False)
         print(f"  after_toc=False 시 블록 수: {len(blocks_no_toc)} (비교용)")
 
-    # 5. V2 결과와 텍스트 비교
-    print("\n[5] V2 extract_pymupdf 결과와 텍스트 비교")
-    raw_v2 = extract_lines(pdf_path, after_toc=True, exclude_header_footer=True)
-    rebuilt = rebuild_lines(raw_v2, y_tolerance=2.0, hyphen_merge=False)
-    norm = normalize_lines(rebuilt)
-    filtered = apply_table_figure_filter(norm, table_caption_only=True, figure_caption_only=True)
-    filtered = apply_equation_filter(filtered, exclude_equation=True)
-    # TOC는 extract_lines 내부에서 적용됨
-    v2_texts = set(r.get("text", "").strip() for r in filtered if r.get("text"))
-    raw_texts = set(b.get("text", "").strip() for b in blocks if b.get("text"))
-    overlap = len(v2_texts & raw_texts)
-    only_v2 = len(v2_texts - raw_texts)
-    only_raw = len(raw_texts - v2_texts)
-    print(f"  V2 고유 텍스트 수: {len(v2_texts)}")
-    print(f"  Raw 고유 텍스트 수: {len(raw_texts)}")
-    print(f"  공통: {overlap}, V2에만: {only_v2}, Raw에만: {only_raw}")
-    # Raw가 V2와 비슷하거나 더 많아야 함 (merge로 인해 Raw가 적을 수 있음)
-    if overlap >= len(v2_texts) * 0.9 or len(raw_texts) >= len(v2_texts) * 0.8:
-        print("  [OK] 텍스트 누락 없음 (대략적 비교)")
-    else:
-        print("  [INFO] V2와 Raw 구조 차이로 인한 텍스트 수 차이 가능 (paragraph merge 등)")
+    # 5. (V2 비교 생략 — extract_pymupdf는 Phase 6에서 삭제됨)
+    print("\n[5] 텍스트 통계")
+    raw_texts = [b.get("text", "").strip() for b in blocks if b.get("text")]
+    print(f"  Raw 텍스트 블록 수: {len(raw_texts)}")
 
     # 샘플 블록 출력
     print("\n--- 상위 5개 Raw 블록 샘플 ---")

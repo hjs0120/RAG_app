@@ -6,7 +6,7 @@
 1. Phase 3 결과 canonical_records를 build_chunks(canonical_records)에 입력
 2. 생성된 Chunk에 metadata.structure_path, physical_page, file_name 포함 여부
 3. chunk_validate.validate(chunks) 통과
-4. V2 Chunk 결과와 텍스트 내용 비교 (누락 없음)
+4. (V2 Chunk 비교 생략 — Phase 6에서 extract_pymupdf/parse_state_machine 삭제)
 """
 
 import sys
@@ -19,13 +19,6 @@ from src.core.extract_pdf_raw import extract_raw
 from src.core.rule_marine_regulation import map_to_canonical
 from src.core.chunk_builder import build_chunks, TARGET_LEN, MAX_LEN, MIN_CHUNK_LEN
 from src.core.chunk_validate import validate_chunks as chunk_validate
-from src.core.parse_state_machine import parse_lines
-from src.core.extract_pymupdf import extract_lines
-from src.core.line_rebuild import rebuild_lines
-from src.core.normalize import normalize_lines
-from src.core.table_figure_filter import apply_table_figure_filter
-from src.core.equation_filter import apply_equation_filter
-from src.core import export_jsonl
 
 
 def main() -> None:
@@ -113,41 +106,10 @@ def main() -> None:
     else:
         print("  [OK] 검증 통과")
 
-    # 5. V2 Chunk와 텍스트 비교
-    print("\n[5] V2 Chunk 결과와 텍스트 비교")
-    v2_raw = extract_lines(pdf_path, after_toc=True, exclude_header_footer=True)
-    v2_rebuilt = rebuild_lines(v2_raw, y_tolerance=2.0, hyphen_merge=False)
-    v2_norm = normalize_lines(v2_rebuilt)
-    v2_filtered = apply_table_figure_filter(v2_norm, table_caption_only=True, figure_caption_only=True)
-    v2_filtered = apply_equation_filter(v2_filtered, exclude_equation=True)
-    v2_parsed = parse_lines(v2_filtered)
-
-    # V2 export -> chunk
-    v2_merged = export_jsonl.merge_paragraphs(v2_parsed)
-    v2_records = [
-        export_jsonl.build_record(
-            line,
-            doc_id="MOUS_RULE_2024",
-            source_file=pdf_path.name,
-        )
-        for line in v2_merged
-    ]
-    v2_chunks = build_chunks(
-        v2_records,
-        target_len=TARGET_LEN,
-        max_len=MAX_LEN,
-        min_chunk_len=MIN_CHUNK_LEN,
-    )
-
+    # 5. (V2 비교 생략)
+    print("\n[5] Chunk 텍스트 통계")
     canon_text_len = sum(len(c.get("text", "")) for c in chunks)
-    v2_text_len = sum(len(c.get("text", "")) for c in v2_chunks)
     print(f"  Canonical Chunk 총 텍스트 길이: {canon_text_len}")
-    print(f"  V2 Chunk 총 텍스트 길이: {v2_text_len}")
-    ratio = canon_text_len / v2_text_len if v2_text_len > 0 else 0
-    if 0.7 <= ratio <= 1.3:
-        print("  [OK] 텍스트 양 대략 일치 (70~130%)")
-    else:
-        print(f"  [INFO] 비율 {ratio:.2f} (형식 차이로 차이 가능)")
 
     print("\n" + "=" * 60)
     print("Phase 4 수동 검증 완료")

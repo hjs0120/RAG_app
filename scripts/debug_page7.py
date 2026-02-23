@@ -1,4 +1,7 @@
-"""물리 7페이지 파이프라인 디버그 — 제 1 장 총칙, 제 1 절 일반사항 추적."""
+"""물리 7페이지 파이프라인 디버그 — 제 1 장 총칙, 제 1 절 일반사항 추적.
+
+V3: extract_pdf_raw + rule_marine_regulation 사용.
+"""
 
 import sys
 from pathlib import Path
@@ -6,24 +9,24 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from src.core.extract_pymupdf import extract_lines
-from src.core.toc_detector import detect_toc_start, apply_toc_filter
-from src.core.line_rebuild import rebuild_lines
-from src.core.normalize import normalize_lines
-from src.core.table_figure_filter import apply_table_figure_filter
-from src.core.equation_filter import apply_equation_filter
-from src.core.parse_state_machine import parse_lines
+from src.core.extract_pdf_raw import extract_raw
+from src.core.rule_marine_regulation import map_to_canonical
 
 
-def _find(lines, keywords, label):
+def _find(blocks_or_records, keywords, label, is_canonical: bool = False):
     hits = []
-    for i, ln in enumerate(lines):
-        t = ln.get("text", "")
+    for i, item in enumerate(blocks_or_records):
+        if is_canonical:
+            t = item.content.text if hasattr(item, "content") else ""
+            page = item.location.physical_page if item.location else 0
+        else:
+            t = item.get("text", "")
+            page = item.get("page", 0)
         for k in keywords:
             if k in t:
-                hits.append((i, ln.get("page"), t[:70]))
+                hits.append((i, page, t[:70]))
                 break
-    print(f"  [{label}] {len(hits)} lines")
+    print(f"  [{label}] {len(hits)} items")
     for i, p, t in hits[:10]:
         print(f"    [{i}] p{p}: {t}")
     return hits
@@ -37,42 +40,43 @@ def main():
         print("PDF 없음")
         return
 
-    raw = extract_lines(pdf_path, after_toc=False, exclude_header_footer=True)
-    _, body_start = detect_toc_start(raw)
-    print(f"TOC body_start index: {body_start} (total raw: {len(raw)})")
-
     kw = ["제 1 장", "총칙", "제 1 절", "일반사항", "101."]
-    print("\n--- Raw (before TOC) ---")
+
+    # Raw (after_toc=False)
+    raw_no_toc = extract_raw(
+        pdf_path,
+        doc_id="MOUS_RULE_2024",
+        after_toc=False,
+        exclude_header_footer=True,
+    )
+    print("\n--- Raw (after_toc=False) ---")
+    _find(raw_no_toc, kw, "raw_no_toc")
+
+    # Raw (after_toc=True)
+    raw = extract_raw(
+        pdf_path,
+        doc_id="MOUS_RULE_2024",
+        after_toc=True,
+        exclude_header_footer=True,
+    )
+    print("\n--- Raw (after_toc=True) ---")
     _find(raw, kw, "raw")
+    if raw:
+        print("  First 5 blocks:")
+        for i, blk in enumerate(raw[:5]):
+            print(f"    [{i}] p{blk.get('page')} {str(blk.get('text',''))[:60]}")
 
-    after_toc = apply_toc_filter(raw, after_toc=True)
-    print("\n--- After TOC ---")
-    _find(after_toc, kw, "after_toc")
-    if after_toc:
-        print("  First 5 lines:")
-        for i, ln in enumerate(after_toc[:5]):
-            print(f"    [{i}] p{ln.get('page')} {ln.get('text','')[:60]}")
+    # Canonical
+    canonical = map_to_canonical(raw, {"file_name": pdf_path.name})
+    print("\n--- Canonical ---")
+    _find(canonical, kw, "canonical", is_canonical=True)
 
-    rebuilt = rebuild_lines(after_toc, y_tolerance=2.0, hyphen_merge=False)
-    print("\n--- After Rebuild ---")
-    _find(rebuilt, kw, "rebuilt")
-
-    norm = normalize_lines(rebuilt)
-    print("\n--- After Normalize ---")
-    _find(norm, kw, "normalize")
-
-    filt = apply_table_figure_filter(norm, table_caption_only=True, figure_caption_only=True)
-    filt = apply_equation_filter(filt, exclude_equation=True)
-    print("\n--- After table/equation filters ---")
-    _find(filt, kw, "filters")
-
-    parsed = parse_lines(filt)
-    page7 = [p for p in parsed if p.get("page") == 7]
-    print(f"\n--- Page 7 parsed: {len(page7)} lines ---")
-    for i, ln in enumerate(page7[:15]):
-        t = ln.get("text", "")[:50]
-        ch = (ln.get("path") or {}).get("chapter")
-        print(f"  [{i}] {ch} | {t}")
+    page7 = [r for r in canonical if r.location and r.location.physical_page == 7]
+    print(f"\n--- Page 7 canonical: {len(page7)} records ---")
+    for i, rec in enumerate(page7[:15]):
+        t = (rec.content.text or "")[:50]
+        struct = " > ".join(s.label for s in rec.structure[:2]) if rec.structure else ""
+        print(f"  [{i}] {struct} | {t}")
 
 
 if __name__ == "__main__":
