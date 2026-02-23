@@ -10,10 +10,10 @@ PySide6 기반 데스크톱 앱. PDF 규격문서에서 텍스트를 추출하�
 
 | Phase | 내용 | 완료 |
 |-------|------|:----:|
-| 1 | Canonical Schema 확정 — 데이터클래스, 검증, 출처 포매터 | [ ] |
-| 2 | PDF → Raw JSONL 변환 모듈 (`extract_pdf_raw.py`) | [ ] |
-| 3 | Raw → Canonical 변환 규칙 (`rule_marine_regulation.py`) | [ ] |
-| 4 | Chunk 모듈 Canonical 기반으로 수정 (`chunk_builder.py`) | [ ] |
+| 1 | Canonical Schema 확정 — 데이터클래스, 검증, 출처 포매터 | [x] |
+| 2 | PDF → Raw JSONL 변환 모듈 (`extract_pdf_raw.py`) | [x] |
+| 3 | Raw → Canonical 변환 규칙 (`rule_marine_regulation.py`) | [x] |
+| 4 | Chunk 모듈 Canonical 기반으로 수정 (`chunk_builder.py`) | [x] |
 | 5 | FAISS 연동 및 RAG 파이프라인 출처 표기 개선 | [ ] |
 | 6 | DB 생성 탭 UI 확장 — Raw/Canonical 미리보기 + 검수 기능 | [ ] |
 | 7 | V3 통합 검증 및 문서화 | [ ] |

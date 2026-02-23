@@ -1,9 +1,15 @@
-"""RAG용 Chunk JSONL 생성 — Merge(article+paragraph) 및 Split(600/1000) 로직."""
+"""RAG용 Chunk JSONL 생성 — Merge(article+paragraph) 및 Split(600/1000) 로직.
+
+Phase 4: Canonical JSON 입력 지원. list[CanonicalRecord] 또는 list[dict] (Canonical to_dict).
+V2 JSONL (path 기반) 하위 호환.
+"""
 
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, Union
+
+from src.core.canonical_schema import CanonicalRecord
 
 
 # 기본값 (Phase 13 명세)
@@ -46,6 +52,175 @@ def merge_key(record: dict) -> tuple[str, str, str, str]:
     if not paragraph:
         paragraph = "0"
     return (doc_id, article, section, paragraph)
+
+
+# ----- Canonical (Phase 4) -----
+
+
+def _is_canonical(record: Any) -> bool:
+    """레코드가 Canonical 형식(dict 또는 CanonicalRecord)인지 판별."""
+    if hasattr(record, "content") and hasattr(record, "structure"):
+        return True
+    if isinstance(record, dict) and "content" in record:
+        return True
+    return False
+
+
+def _record_to_canonical_dict(record: Union[CanonicalRecord, dict]) -> dict:
+    """CanonicalRecord 또는 dict를 Canonical dict로 정규화."""
+    if hasattr(record, "to_dict"):
+        return record.to_dict()
+    return record
+
+
+def _canonical_text(rec: dict) -> str:
+    """Canonical dict에서 본문 텍스트 추출."""
+    content = rec.get("content") or {}
+    return (content.get("text") or "").strip()
+
+
+def _canonical_structure_path(rec: dict) -> str:
+    """Canonical structure를 '제1장 > 제1절 > 제101조 > 1항' 형태로 조합."""
+    structure = rec.get("structure") or []
+    if not structure:
+        return ""
+    labels = []
+    for s in structure:
+        if isinstance(s, dict):
+            labels.append(s.get("label") or "")
+        else:
+            labels.append(getattr(s, "label", ""))
+    return " > ".join(l for l in labels if l)
+
+
+def _canonical_merge_key(rec: dict) -> tuple[str, str, bool]:
+    """
+    Canonical 그룹핑용 키.
+    Returns: (doc_id, structure_path, is_merge_group)
+    - is_merge_group: structure 마지막 type이 paragraph면 True (merge 대상)
+    """
+    doc_id = _norm(rec.get("doc_id")) or "_"
+    structure = rec.get("structure") or []
+    path = _canonical_structure_path(rec)
+
+    is_merge = False
+    if structure:
+        last = structure[-1]
+        stype = last.get("type") if isinstance(last, dict) else getattr(last, "type", "")
+        is_merge = stype == "paragraph"
+
+    return (doc_id, path or "_", is_merge)
+
+
+def _group_canonical(records: list[dict]) -> list[tuple[tuple[str, str, bool], list[dict]]]:
+    """Canonical 레코드를 merge key로 그룹핑."""
+    from itertools import groupby
+
+    sorted_rec = sorted(records, key=_canonical_merge_key)
+    out: list[tuple[tuple[str, str, bool], list[dict]]] = []
+    for key, group in groupby(sorted_rec, key=_canonical_merge_key):
+        out.append((key, list(group)))
+    return out
+
+
+def _build_canonical_chunk_meta(recs: list[dict], structure_path: str) -> dict[str, Any]:
+    """Canonical Chunk의 meta: structure_path, physical_page, file_name."""
+    pages: list[int] = []
+    file_name = ""
+    for r in recs:
+        loc = r.get("location") or {}
+        pp = loc.get("physical_page")
+        if pp is not None and pp not in pages:
+            pages.append(pp)
+        src = r.get("source") or {}
+        fn = src.get("file_name")
+        if fn:
+            file_name = str(fn)
+    physical_page = pages[0] if pages else None
+    return {
+        "structure_path": structure_path,
+        "physical_page": physical_page,
+        "file_name": file_name,
+        "pages": pages,
+    }
+
+
+def _build_chunks_from_canonical(
+    records: list[Union[CanonicalRecord, dict]],
+    *,
+    target_len: int = TARGET_LEN,
+    max_len: int = MAX_LEN,
+    min_chunk_len: int = MIN_CHUNK_LEN,
+) -> list[dict]:
+    """
+    Canonical 레코드에서 RAG용 Chunk 생성.
+    스키마: chunk_id, doc_id, text, meta { structure_path, physical_page, file_name }
+    """
+    # dict로 정규화
+    norm_recs = [_record_to_canonical_dict(r) for r in records]
+    grouped = _group_canonical(norm_recs)
+    chunks_out: list[dict] = []
+
+    for (doc_id, structure_path, is_merge_group), recs in grouped:
+        file_name = ""
+        for r in recs:
+            src = r.get("source") or {}
+            if src.get("file_name"):
+                file_name = str(src["file_name"])
+                break
+
+        if not is_merge_group:
+            # 제목 등: 한 줄 = 한 chunk
+            for idx, rec in enumerate(recs, start=1):
+                text = _canonical_text(rec)
+                if not text:
+                    continue
+                if min_chunk_len > 0 and len(text) < min_chunk_len:
+                    continue
+                meta = _build_canonical_chunk_meta([rec], structure_path)
+                chunk_id = _make_chunk_id(doc_id, structure_path, idx)
+                chunks_out.append({
+                    "chunk_id": chunk_id,
+                    "doc_id": doc_id,
+                    "text": text,
+                    "meta": meta,
+                })
+            continue
+
+        # paragraph: merge 후 split
+        clean_text = " ".join(_canonical_text(r) for r in recs if _canonical_text(r)).strip()
+        if not clean_text:
+            continue
+        text_parts = split_into_chunks(clean_text, target_len=target_len, max_len=max_len)
+        for idx, part in enumerate(text_parts, start=1):
+            if min_chunk_len > 0 and len(part.strip()) < min_chunk_len:
+                continue
+            meta = _build_canonical_chunk_meta(recs, structure_path)
+            chunk_id = _make_chunk_id(doc_id, structure_path, idx)
+            chunks_out.append({
+                "chunk_id": chunk_id,
+                "doc_id": doc_id,
+                "text": part.strip(),
+                "meta": meta,
+            })
+    return chunks_out
+
+
+def _make_chunk_id(doc_id: str, structure_path: str, chunk_index: int) -> str:
+    """chunk_id 생성: doc_id + structure_path 축약 + chunk_index."""
+    safe_path = re.sub(r"[^\w\s>]", "", structure_path).replace(" ", "").replace(">", "_")[:40]
+    safe_path = safe_path.rstrip("_") if safe_path else "0"
+    return f"{doc_id}_{safe_path}_{chunk_index}"
+
+
+def from_legacy(records: list[dict]) -> list[dict]:
+    """
+    V2 JSONL 레코드를 Canonical dict 형태로 변환 (가능한 범위).
+    path.article, path.section 등 → structure 추정.
+    완전 변환은 아니며, build_chunks에서 V2 경로로 처리하는 것이 더 정확함.
+    """
+    # V2를 그대로 build_chunks_legacy에 넘기는 것이 맞음. 이 함수는 선택적.
+    return records
 
 
 def group_by_merge_key(records: list[dict]) -> list[tuple[tuple[str, str, str, str], list[dict]]]:
@@ -191,19 +366,33 @@ def build_chunk_meta(lines: list[dict], path: dict) -> dict[str, Any]:
 
 
 def build_chunks(
-    records: list[dict],
+    records: list[Union[CanonicalRecord, dict]],
     *,
     target_len: int = TARGET_LEN,
     max_len: int = MAX_LEN,
     min_chunk_len: int = MIN_CHUNK_LEN,
 ) -> list[dict]:
     """
-    원본 JSONL 레코드 리스트에서 RAG용 Chunk 리스트 생성.
-    - Merge key: (doc_id, article, section, paragraph) — Phase 16
-    - paragraph "0" 그룹: merge 없이 한 줄 = 한 chunk (라인별 분리)
-    - min_chunk_len 미만: 이전/다음과 합치거나 건너뜀(제외)
-    - 스키마: doc_id, article, section, paragraph, chunk_index, text, meta
+    원본 레코드 리스트에서 RAG용 Chunk 리스트 생성.
+
+    Phase 4: Canonical 입력 지원.
+    - Canonical (content/structure 있음): chunk_id, doc_id, text, meta { structure_path, physical_page, file_name }
+    - V2 (path 있음): doc_id, article, section, paragraph, chunk_index, text, meta
+
+    - paragraph "0" / structure 미merge 그룹: 한 줄 = 한 chunk
+    - min_chunk_len 미만: 건너뜀
     """
+    if not records:
+        return []
+
+    if _is_canonical(records[0]):
+        return _build_chunks_from_canonical(
+            records,
+            target_len=target_len,
+            max_len=max_len,
+            min_chunk_len=min_chunk_len,
+        )
+
     chunks_out: list[dict] = []
     grouped = group_by_merge_key(records)
 

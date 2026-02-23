@@ -1,6 +1,14 @@
-"""Chunk JSONL 검증 — 비어있지 않음, 길이, chunk_index, 원본 대비 누락 여부."""
+"""Chunk JSONL 검증 — 비어있지 않음, 길이, chunk_index, Canonical 필드, 원본 대비 누락 여부."""
 
 from __future__ import annotations
+
+
+def _is_canonical_chunk(c: dict) -> bool:
+    """Canonical 형식 Chunk 여부 (chunk_id 또는 meta.structure_path 존재)."""
+    if c.get("chunk_id"):
+        return True
+    meta = c.get("meta") or c.get("metadata") or {}
+    return "structure_path" in meta
 
 
 def validate_chunks(
@@ -8,12 +16,15 @@ def validate_chunks(
     *,
     max_len: int = 1000,
     check_index_sequential: bool = True,
+    check_canonical: bool = True,
 ) -> tuple[bool, list[str]]:
     """
     Chunk 리스트 검증.
     - chunk text 비어있지 않은지
     - chunk 길이가 max_len 이하인지
-    - (article, paragraph)별 chunk_index가 1부터 순차인지
+    - (article, paragraph)별 chunk_index가 1부터 순차인지 (V2)
+    - Canonical Chunk: chunk_id, doc_id, meta.structure_path 필수 확인
+
     Returns:
         (모두 통과 여부, 메시지 리스트)
     """
@@ -30,24 +41,39 @@ def validate_chunks(
             all_ok = False
             messages.append(f"Chunk {i+1}: 길이 {length} > max_len({max_len})")
 
+        if check_canonical and _is_canonical_chunk(c):
+            if not c.get("doc_id"):
+                all_ok = False
+                messages.append(f"Chunk {i+1}: Canonical chunk에 doc_id가 없습니다.")
+            if not c.get("chunk_id"):
+                all_ok = False
+                messages.append(f"Chunk {i+1}: Canonical chunk에 chunk_id가 없습니다.")
+            meta = c.get("meta") or c.get("metadata") or {}
+            if "structure_path" not in meta:
+                all_ok = False
+                messages.append(f"Chunk {i+1}: Canonical chunk에 meta.structure_path가 없습니다.")
+
     if check_index_sequential:
         from itertools import groupby
-        # Phase 16: section 포함하여 (doc_id, article, section, paragraph)별 chunk_index 검사
-        key_fn = lambda c: (
-            c.get("doc_id"),
-            c.get("article"),
-            c.get("section"),
-            c.get("paragraph"),
-        )
-        sorted_chunks = sorted(chunks, key=lambda c: (*key_fn(c), c.get("chunk_index", 0)))
-        for key, group in groupby(sorted_chunks, key=key_fn):
-            indices = [c.get("chunk_index") for c in group]
-            expected = list(range(1, len(indices) + 1))
-            if indices != expected:
-                all_ok = False
-                messages.append(
-                    f"doc_id/article/section/paragraph {key}: chunk_index가 1부터 순차가 아님 (got {indices})"
-                )
+
+        # Canonical chunk는 chunk_index 검사 제외
+        v2_chunks = [c for c in chunks if not _is_canonical_chunk(c)]
+        if v2_chunks:
+            key_fn = lambda c: (
+                c.get("doc_id"),
+                c.get("article"),
+                c.get("section"),
+                c.get("paragraph"),
+            )
+            sorted_v2 = sorted(v2_chunks, key=lambda c: (*key_fn(c), c.get("chunk_index", 0)))
+            for key, group in groupby(sorted_v2, key=key_fn):
+                indices = [c.get("chunk_index") for c in group]
+                expected = list(range(1, len(indices) + 1))
+                if indices != expected:
+                    all_ok = False
+                    messages.append(
+                        f"doc_id/article/section/paragraph {key}: chunk_index가 1부터 순차가 아님 (got {indices})"
+                    )
 
     if all_ok:
         messages.append("검증 통과: text 비어있지 않음, 길이 제한 준수, chunk_index 순차.")

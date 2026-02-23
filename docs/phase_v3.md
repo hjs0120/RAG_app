@@ -30,12 +30,14 @@
 | 1 | Canonical Schema 확정 — 데이터클래스, 검증, 출처 포매터 | [x] |
 | 2 | PDF → Raw JSONL 변환 모듈 (`extract_pdf_raw.py`) | [x] |
 | 3 | Raw → Canonical 변환 규칙 (`rule_marine_regulation.py`) | [x] |
-| 4 | Chunk 모듈 Canonical 기반으로 수정 (`chunk_builder.py`) | [ ] |
+| 4 | Chunk 모듈 Canonical 기반으로 수정 (`chunk_builder.py`) | [x] |
 | 5 | FAISS 연동 및 RAG 파이프라인 출처 표기 개선 | [ ] |
 | 6 | DB 생성 탭 UI 확장 — Raw/Canonical 미리보기 + 검수 기능 | [ ] |
 | 7 | V3 통합 검증 및 문서화 | [ ] |
 
 각 Phase의 **진도 체크** 항목을 검증 후 `[ ]` → `[x]`로 바꾸고, 위 표의 완료도 필요 시 ☑로 갱신하면 된다.
+
+**각 Phase 완료 시** 해당 Phase 끝의 **커밋 메시지**를 참고하여 커밋을 정리한다.
 
 ---
 
@@ -113,6 +115,14 @@
 - [x] 수동 변환 10개 레코드 검증 통과
 - [x] 수동 검증 완료
 
+### Phase 1 완료 시 커밋
+
+```
+feat(core): Phase 1 — Canonical Schema 확정
+
+- canonical_schema, canonical_validator, citation_formatter 신규
+```
+
 ---
 
 ## Phase 2: PDF → Raw JSONL 변환 모듈
@@ -184,6 +194,14 @@ PDF에서 블록 단위 Raw JSONL을 생성하는 모듈을 작성한다. 기존
 - [x] V2 추출 결과와 텍스트 비교 검증
 - [x] 수동 검증 완료
 
+### Phase 2 완료 시 커밋
+
+```
+feat(core): Phase 2 — PDF → Raw JSONL 변환 모듈
+
+- extract_pdf_raw, raw_validator 신규
+```
+
 ---
 
 ## Phase 3: Raw → Canonical 변환 규칙 (`rule_marine_regulation.py`)
@@ -249,6 +267,14 @@ Raw JSONL을 Canonical JSON으로 변환하는 규칙 모듈을 작성한다. �
 - [x] V2 파싱 결과와 구조 비교 검증
 - [x] 수동 검증 완료
 
+### Phase 3 완료 시 커밋
+
+```
+feat(core): Phase 3 — Raw → Canonical 변환 규칙
+
+- rule_marine_regulation 신규, map_to_canonical 구현
+```
+
 ---
 
 ## Phase 4: Chunk 모듈 Canonical 기반으로 수정
@@ -310,12 +336,24 @@ Raw JSONL을 Canonical JSON으로 변환하는 규칙 모듈을 작성한다. �
 
 ### 진도 체크
 
-- [ ] `chunk_builder.py` Canonical 입력 처리 구현
-- [ ] `metadata.structure_path` 자동 조합 확인
-- [ ] `metadata.physical_page` 정확 반영 확인
-- [ ] `chunk_validate.py` 검증 보완
-- [ ] V2 결과와 Chunk 텍스트 비교 검증
-- [ ] 수동 검증 완료
+- [x] `chunk_builder.py` Canonical 입력 처리 구현
+- [x] `metadata.structure_path` 자동 조합 확인
+- [x] `metadata.physical_page` 정확 반영 확인
+- [x] `chunk_validate.py` 검증 보완
+- [x] V2 결과와 Chunk 텍스트 비교 검증
+- [x] 수동 검증 완료
+
+### Phase 4 완료 시 커밋
+
+```
+feat(chunk): Phase 4 — Chunk 모듈 Canonical 기반 수정
+
+- chunk_builder: CanonicalRecord/dict 입력 지원, 자동 형식 감지
+- Chunk meta: structure_path, physical_page, file_name 자동 조합
+- chunk_validate: Canonical Chunk 필드 검증 추가
+- V2 JSONL 하위 호환 유지
+- scripts/test_chunk_canonical_phase4.py 검증 스크립트 추가
+```
 
 ---
 
@@ -368,6 +406,14 @@ Canonical 기반 Chunk를 FAISS에 인덱싱하고, RAG 파이프라인의 출�
 - [ ] 출처 드롭다운/답변에 개선된 출처 표시 확인
 - [ ] 기존 V2 인덱스 하위 호환 동작 확인
 - [ ] 수동 검증 완료
+
+### Phase 5 완료 시 커밋
+
+```
+feat(rag): Phase 5 — FAISS 연동 및 RAG 출처 표기 개선
+
+(완료 후 커밋 메시지 정리)
+```
 
 ---
 
@@ -446,6 +492,14 @@ DB 생성 탭을 V3 파이프라인에 맞게 확장한다. Raw JSONL 미리보�
 - [ ] `extract_pymupdf.py` 삭제
 - [ ] `parse_state_machine.py` 삭제
 - [ ] 수동 검증 완료
+
+### Phase 6 완료 시 커밋
+
+```
+feat(ui): Phase 6 — DB 생성 탭 Raw/Canonical 미리보기 + 검수
+
+(완료 후 커밋 메시지 정리)
+```
 
 ---
 
@@ -529,6 +583,14 @@ V3 완료 기준(goal_v3.md §7)을 충족하는지 검증하고, 문서를 정�
 - [ ] Raw/Canonical 검수 기능 동작 확인
 - [ ] `readme.md` 갱신
 - [ ] `phase_v3.md` 진도 반영
+
+### Phase 7 완료 시 커밋
+
+```
+docs: Phase 7 — V3 통합 검증 및 문서화
+
+(완료 후 커밋 메시지 정리)
+```
 
 ---
 
