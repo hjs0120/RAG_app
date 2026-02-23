@@ -18,7 +18,7 @@
 
 ## 테스트 데이터
 
-- **경로**: `data/이동식 해양구조물 규칙_2024.pdf`
+- **경로**: `data/이동식 해양구조물 규칙_2024-7-92.pdf`
 - **기존 인덱스**: `output/rules.index`, `output/rules_meta.jsonl`
 
 ---
@@ -27,9 +27,9 @@
 
 | Phase | 내용 | 완료 |
 |-------|------|:----:|
-| 1 | Canonical Schema 확정 — 데이터클래스, 검증, 출처 포매터 | [ ] |
-| 2 | PDF → Raw JSONL 변환 모듈 (`extract_pdf_raw.py`) | [ ] |
-| 3 | Raw → Canonical 변환 규칙 (`rule_marine_regulation.py`) | [ ] |
+| 1 | Canonical Schema 확정 — 데이터클래스, 검증, 출처 포매터 | [x] |
+| 2 | PDF → Raw JSONL 변환 모듈 (`extract_pdf_raw.py`) | [x] |
+| 3 | Raw → Canonical 변환 규칙 (`rule_marine_regulation.py`) | [x] |
 | 4 | Chunk 모듈 Canonical 기반으로 수정 (`chunk_builder.py`) | [ ] |
 | 5 | FAISS 연동 및 RAG 파이프라인 출처 표기 개선 | [ ] |
 | 6 | DB 생성 탭 UI 확장 — Raw/Canonical 미리보기 + 검수 기능 | [ ] |
@@ -60,7 +60,7 @@
      "doc_id": "MOUS_RULE_2024",
      "doc_type": "regulation",
      "source": {
-       "file_name": "이동식 해양구조물 규칙_2024.pdf",
+       "file_name": "이동식 해양구조물 규칙_2024-7-92.pdf",
        "organization": "KR",
        "version": "2024"
      },
@@ -87,7 +87,7 @@
 
 4. **수동 변환 검증**
 
-   - 기존 문서(`이동식 해양구조물 규칙_2024.pdf`)의 레코드 10개를 Canonical로 수동 작성
+   - 기존 문서(`이동식 해양구조물 규칙_2024-7-92.pdf`)의 레코드 10개를 Canonical로 수동 작성
    - `canonical_validator`로 검증 통과 여부 확인
 
 ### Phase 1에서 다루는 소스
@@ -106,12 +106,12 @@
 
 ### 진도 체크
 
-- [ ] `canonical_schema.py` 데이터클래스 작성
-- [ ] `from_dict` / `to_dict` 직렬화 구현
-- [ ] `canonical_validator.py` 필수 필드 검증 구현
-- [ ] `citation_formatter.py` 출처 포매터 구현
-- [ ] 수동 변환 10개 레코드 검증 통과
-- [ ] 수동 검증 완료
+- [x] `canonical_schema.py` 데이터클래스 작성
+- [x] `from_dict` / `to_dict` 직렬화 구현
+- [x] `canonical_validator.py` 필수 필드 검증 구현
+- [x] `citation_formatter.py` 출처 포매터 구현
+- [x] 수동 변환 10개 레코드 검증 통과
+- [x] 수동 검증 완료
 
 ---
 
@@ -169,20 +169,20 @@ PDF에서 블록 단위 Raw JSONL을 생성하는 모듈을 작성한다. 기존
 
 ### 수동 검증 방법
 
-1. `extract_raw("이동식 해양구조물 규칙_2024.pdf", doc_id="MOUS_RULE_2024")` 실행
+1. `extract_raw("이동식 해양구조물 규칙_2024-7-92.pdf", doc_id="MOUS_RULE_2024")` 실행
 2. 반환된 블록 리스트에 `bbox`, `style.font_size`, `block_id` 포함 여부 확인
 3. `raw_validator.validate(blocks)` → 오류 없이 통과 확인
 4. V2 `extract_pymupdf.py` 결과와 텍스트 내용 비교하여 누락 없는지 확인
 
 ### 진도 체크
 
-- [ ] `extract_pdf_raw.py` 기본 블록 추출 구현
-- [ ] `bbox`, `style` 필드 포함 확인
-- [ ] `after_toc` 옵션 동작 확인
-- [ ] 머릿말/꼬리말, 수식, 표·그림 필터 옵션 구현
-- [ ] `raw_validator.py` 구현
-- [ ] V2 추출 결과와 텍스트 비교 검증
-- [ ] 수동 검증 완료
+- [x] `extract_pdf_raw.py` 기본 블록 추출 구현
+- [x] `bbox`, `style` 필드 포함 확인
+- [x] `after_toc` 옵션 동작 확인
+- [x] 머릿말/꼬리말, 수식, 표·그림 필터 옵션 구현
+- [x] `raw_validator.py` 구현
+- [x] V2 추출 결과와 텍스트 비교 검증
+- [x] 수동 검증 완료
 
 ---
 
@@ -242,12 +242,12 @@ Raw JSONL을 Canonical JSON으로 변환하는 규칙 모듈을 작성한다. �
 
 ### 진도 체크
 
-- [ ] `map_to_canonical` 기본 구현
-- [ ] chapter/section/article/paragraph 계층 스택 상태머신 구현
-- [ ] 분류 불가 블록 예외 처리
-- [ ] `canonical_validator` 통과 확인
-- [ ] V2 파싱 결과와 구조 비교 검증
-- [ ] 수동 검증 완료
+- [x] `map_to_canonical` 기본 구현
+- [x] chapter/section/article/paragraph 계층 스택 상태머신 구현
+- [x] 분류 불가 블록 예외 처리
+- [x] `canonical_validator` 통과 확인
+- [x] V2 파싱 결과와 구조 비교 검증
+- [x] 수동 검증 완료
 
 ---
 
@@ -273,7 +273,7 @@ Raw JSONL을 Canonical JSON으로 변환하는 규칙 모듈을 작성한다. �
      "metadata": {
        "structure_path": "제1장 > 제1절 > 제101조 > 1항",
        "physical_page": 7,
-       "file_name": "이동식 해양구조물 규칙_2024.pdf"
+       "file_name": "이동식 해양구조물 규칙_2024-7-92.pdf"
      }
    }
    ```
@@ -469,7 +469,7 @@ V3 완료 기준(goal_v3.md §7)을 충족하는지 검증하고, 문서를 정�
 1. **통합 검증**
 
    - 위 완료 기준 6개 항목 수동 테스트
-   - 실제 PDF(`이동식 해양구조물 규칙_2024.pdf`) 전체 파이프라인 실행
+   - 실제 PDF(`이동식 해양구조물 규칙_2024-7-92.pdf`) 전체 파이프라인 실행
    - V2 결과와 V3 결과의 RAG 답변 품질 비교
 
 2. **문서 작성**
