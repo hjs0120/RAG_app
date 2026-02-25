@@ -69,7 +69,7 @@ curl -X POST http://127.0.0.1:8000/api/ask -H "Content-Type: application/json" -
 | Phase | 내용 | 완료 |
 |-------|------|:----:|
 | 1 | FastAPI 앱 및 POST /api/ask 엔드포인트, core/rag 연동 | [x] |
-| 2 | Uvicorn 서브프로세스 제어 (server_manager.py) | [ ] |
+| 2 | Uvicorn 서브프로세스 제어 (server_manager.py) | [x] |
 | 3 | 서버 서비스 탭 UI (설정/버튼/LED/로그) | [ ] |
 | 4 | Web Client (채팅 UI, fetch API, 출처 카드 뷰) | [ ] |
 | 5 | main_window 탭 통합 및 통합 테스트 | [ ] |
@@ -196,11 +196,11 @@ Admin UI에서 서버를 시작/중단할 수 있도록 Uvicorn을 서브프로�
 
 ### 진도 체크
 
-- [ ] `ServerManager` 클래스 구현
-- [ ] `start()`, `stop()`, `is_running()` 동작
-- [ ] 로그 파이프/콜백 구현
-- [ ] 포트 충돌 등 에러 처리
-- [ ] 수동 검증 완료
+- [x] `ServerManager` 클래스 구현
+- [x] `start()`, `stop()`, `is_running()` 동작
+- [x] 로그 파이프/콜백 구현
+- [x] 포트 충돌 등 에러 처리
+- [x] 수동 검증 완료
 
 ### Phase 2 완료 시 커밋
 
