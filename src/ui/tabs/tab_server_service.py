@@ -25,8 +25,9 @@ class TabServerService(QWidget):
 
     _log_signal = Signal(str)
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, app_state: dict | None = None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self._app_state = app_state or {}
         self._manager = ServerManager()
         self._manager.set_log_callback(self._on_log_from_thread)
         self._log_signal.connect(self._append_log)
@@ -47,7 +48,8 @@ class TabServerService(QWidget):
         self._edit_port = QSpinBox()
         self._edit_port.setRange(1, 65535)
         self._edit_port.setValue(8081)
-        self._edit_port.setMaximumWidth(80)
+        self._edit_port.setMinimumWidth(90)
+        self._edit_port.setMaximumWidth(100)
         config_layout.addWidget(self._edit_port)
         config_layout.addStretch()
         layout.addWidget(group_config)
@@ -124,18 +126,26 @@ class TabServerService(QWidget):
         if ok:
             self._update_led("running")
             self._update_buttons(True)
-            self._append_log(f"[INFO] API 서버 시작: http://{host}:{port}")
+            url = f"http://{host}:{port}"
+            self._append_log(f"[INFO] API 서버 시작: {url}")
+            self._app_state["server_running"] = True
+            self._app_state["server_url"] = url
         else:
             self._update_led("error")
             self._error_state = True
             self._append_log("[ERROR] 서버가 이미 실행 중이거나 시작에 실패했습니다.")
+            self._app_state["server_running"] = False
+            self._app_state["server_url"] = None
 
     def _on_stop(self) -> None:
         self._append_log("[INFO] 서버 중단 중...")
         self._manager.stop()
         self._update_led("stopped")
         self._update_buttons(False)
-        self._append_log("[INFO] 서버가 중지되었습니다.")
+        self._append_log("[INFO] 서버가 중지되었습니다. (모델 메모리 해제됨)")
+        if self._app_state is not None:
+            self._app_state["server_running"] = False
+            self._app_state["server_url"] = None
 
     def is_server_running(self) -> bool:
         """서버 실행 여부."""

@@ -5,6 +5,8 @@ import re
 import sys
 from pathlib import Path
 
+import requests
+
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -24,7 +26,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
 )
-from PySide6.QtCore import QThread, Signal, QObject, Qt, QEvent
+from PySide6.QtCore import QThread, Signal, QObject, Qt, QEvent, QTimer
 from PySide6.QtGui import QPixmap
 
 from src.core.embedding_bge import encode_query, preload_model, BGE_MODEL_PATH
@@ -271,6 +273,71 @@ class RAGWorker(QObject):
             self.error.emit(str(e))
 
 
+class APIAskWorker(QObject):
+    """API 서버 /api/ask 호출 (서버 모드)."""
+
+    finished = Signal(object)
+    error = Signal(str)
+
+    def __init__(self, server_url: str, question: str, top_k: int, parent: QObject | None = None) -> None:
+        super().__init__(parent)
+        self._server_url = server_url.rstrip("/")
+        self._question = question
+        self._top_k = top_k
+
+    def run(self) -> None:
+        try:
+            r = requests.post(
+                f"{self._server_url}/api/ask",
+                json={"query": self._question, "top_k": self._top_k},
+                timeout=120,
+            )
+            r.raise_for_status()
+            data = r.json()
+            if data.get("status") == "error":
+                self.error.emit(data.get("answer", "API 오류"))
+                return
+            # API 응답 → RAGResult 형식으로 변환
+            answer = data.get("answer", "")
+            sources_raw = data.get("sources", [])
+            sources_meta = []
+            retrieved_chunks = []
+            for i, s in enumerate(sources_raw):
+                meta = s.get("metadata", {})
+                chunk_id = s.get("chunk_id", "")
+                # doc_id: API에서 전달된 값 우선, 없으면 file_name 기반 (chunk_id는 장절 경로 포함해 PDF 매칭에 부적합)
+                doc_id = meta.get("doc_id") or ""
+                if not doc_id:
+                    file_name = meta.get("file_name", "")
+                    if file_name:
+                        doc_id = _doc_id_from_path(file_name)
+                m = {
+                    "chunk_id": chunk_id,
+                    "doc_id": doc_id,
+                    "page": meta.get("physical_page"),
+                    "meta": meta,
+                    "full_text": s.get("text", ""),
+                    "text": (s.get("text", ""))[:500],
+                }
+                sources_meta.append(m)
+                retrieved_chunks.append((i, 0.0, m))
+            ctx = "\n\n".join(s.get("text", "") for s in sources_raw)
+            result = RAGResult(
+                question=self._question,
+                retrieved_chunks=retrieved_chunks,
+                assembled_context=ctx,
+                answer=answer,
+                sources=[f"[{i+1}] {m.get('chunk_id','')}" for i, m in enumerate(sources_meta)],
+                sources_meta=sources_meta,
+                debug_info={"source": "api"},
+            )
+            self.finished.emit(result)
+        except requests.RequestException as e:
+            self.error.emit(f"API 연결 실패: {e}")
+        except Exception as e:
+            self.error.emit(str(e))
+
+
 class TabUsage(QWidget):
     """사용 탭 — 모델 관리, 질문/검색, 검색 결과, 답변, 출처."""
 
@@ -286,6 +353,8 @@ class TabUsage(QWidget):
         self._search_thread: QThread | None = None
         self._rag_worker: RAGWorker | None = None
         self._rag_thread: QThread | None = None
+        self._api_ask_worker: APIAskWorker | None = None
+        self._api_ask_thread: QThread | None = None
         self._model_load_worker: ModelLoadWorker | None = None
         self._model_load_thread: QThread | None = None
         self._models_list_worker: ModelsListWorker | None = None
@@ -488,12 +557,38 @@ class TabUsage(QWidget):
         # 초기: Ollama 모델 목록, bge-m3 확인
         self._on_refresh_models()
         self._on_check_bge()
+        # 서버 상태 주기적 갱신 (2초마다) — 서버 모드 시 버튼 활성화
+        self._server_status_timer = QTimer(self)
+        self._server_status_timer.timeout.connect(self._refresh_server_status)
+        self._server_status_timer.start(2000)
+        self._refresh_server_status()
 
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:
         """뷰포트 리사이즈 시 PDF 스케일 갱신."""
         if obj is self._scroll_pdf.viewport() and event.type() == QEvent.Type.Resize:
             self._display_pdf_fit_width()
         return super().eventFilter(obj, event)
+
+    def _use_server_mode(self) -> bool:
+        """서버 모드 사용 가능 여부."""
+        return bool(self._state.get("server_running") and self._state.get("server_url"))
+
+    def _refresh_server_status(self) -> None:
+        """서버 상태에 따라 모델 상태 라벨·버튼 갱신."""
+        if self._use_server_mode():
+            self._label_model_status.setText("서버 모드 (API 사용 가능)")
+            self._label_model_status.setStyleSheet("color: #22c55e;")
+            self._btn_answer.setEnabled(True)
+            self._btn_search.setEnabled(False)  # 검색은 로컬 인덱스 필요
+        else:
+            if self._models_loaded:
+                self._label_model_status.setText("로드 완료 (bge-m3, Ollama)")
+                self._label_model_status.setStyleSheet("color: #060;")
+            else:
+                self._label_model_status.setText("미로드 (첫 질문 시 로드됨)")
+                self._label_model_status.setStyleSheet("color: #666;")
+            self._btn_answer.setEnabled(self._models_loaded)
+            self._btn_search.setEnabled(self._models_loaded)
 
     def _on_check_bge(self) -> None:
         """bge-m3 모델 존재 여부 확인."""
@@ -590,10 +685,7 @@ class TabUsage(QWidget):
         self._model_load_thread.wait()
         self._btn_load_models.setEnabled(True)
         self._models_loaded = True
-        self._label_model_status.setText("로드 완료 (bge-m3, Ollama)")
-        self._label_model_status.setStyleSheet("color: #060;")
-        self._btn_search.setEnabled(True)
-        self._btn_answer.setEnabled(True)
+        self._refresh_server_status()
 
     def _on_model_load_error(self, msg: str) -> None:
         if self._model_load_thread:
@@ -763,8 +855,6 @@ class TabUsage(QWidget):
         if not question:
             self._label_status.setText("질문을 입력하세요.")
             return
-        if not self._ensure_index_loaded():
-            return
         self._btn_search.setEnabled(False)
         self._btn_answer.setEnabled(False)
         self._label_status.setText("답변 생성중…")
@@ -775,22 +865,43 @@ class TabUsage(QWidget):
         self._last_sources_meta = []
         self._edit_context.clear()
         self._label_context_info.setText("문자 수: - | 그룹: -")
-        pipeline = RAGPipeline(self._index, self._meta_list)
         top_k = self._spin_topk.value()
-        model = self._combo_model.currentText().strip() or DEFAULT_OLLAMA_MODEL
-        self._rag_worker = RAGWorker(pipeline, question, top_k, model=model)
-        self._rag_thread = QThread()
-        self._rag_worker.moveToThread(self._rag_thread)
-        self._rag_thread.started.connect(self._rag_worker.run)
-        self._rag_worker.finished.connect(self._on_rag_finished)
-        self._rag_worker.error.connect(self._on_rag_error)
-        self._rag_thread.start()
+
+        if self._use_server_mode():
+            # 서버 모드: API 호출 (로컬 모델/인덱스 불필요)
+            url = self._state["server_url"]
+            self._api_ask_worker = APIAskWorker(url, question, top_k)
+            self._api_ask_thread = QThread()
+            self._api_ask_worker.moveToThread(self._api_ask_thread)
+            self._api_ask_thread.started.connect(self._api_ask_worker.run)
+            self._api_ask_worker.finished.connect(self._on_rag_finished)
+            self._api_ask_worker.error.connect(self._on_rag_error)
+            self._api_ask_thread.start()
+        else:
+            # 로컬 모드: RAG 파이프라인
+            if not self._ensure_index_loaded():
+                self._refresh_server_status()
+                return
+            pipeline = RAGPipeline(self._index, self._meta_list)
+            model = self._combo_model.currentText().strip() or DEFAULT_OLLAMA_MODEL
+            self._rag_worker = RAGWorker(pipeline, question, top_k, model=model)
+            self._rag_thread = QThread()
+            self._rag_worker.moveToThread(self._rag_thread)
+            self._rag_thread.started.connect(self._rag_worker.run)
+            self._rag_worker.finished.connect(self._on_rag_finished)
+            self._rag_worker.error.connect(self._on_rag_error)
+            self._rag_thread.start()
 
     def _on_rag_finished(self, result: RAGResult) -> None:
-        self._rag_thread.quit()
-        self._rag_thread.wait()
-        self._btn_search.setEnabled(self._models_loaded)
-        self._btn_answer.setEnabled(self._models_loaded)
+        if self._rag_thread:
+            self._rag_thread.quit()
+            self._rag_thread.wait()
+            self._rag_thread = None
+        if self._api_ask_thread:
+            self._api_ask_thread.quit()
+            self._api_ask_thread.wait()
+            self._api_ask_thread = None
+        self._refresh_server_status()
         self._label_status.setText("답변 생성 완료")
 
         # 검색 결과 리스트 (retrieved_chunks → last_search_results)
@@ -834,6 +945,10 @@ class TabUsage(QWidget):
         if self._rag_thread:
             self._rag_thread.quit()
             self._rag_thread.wait()
-        self._btn_search.setEnabled(self._models_loaded)
-        self._btn_answer.setEnabled(self._models_loaded)
+            self._rag_thread = None
+        if self._api_ask_thread:
+            self._api_ask_thread.quit()
+            self._api_ask_thread.wait()
+            self._api_ask_thread = None
+        self._refresh_server_status()
         self._label_status.setText(f"오류: {msg}")

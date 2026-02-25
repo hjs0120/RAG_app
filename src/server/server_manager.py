@@ -73,6 +73,9 @@ class ServerManager:
         # Windows 한글 환경: 자식 프로세스 출력을 UTF-8로 고정 (한글 깨짐 방지)
         env = dict(os.environ)
         env["PYTHONIOENCODING"] = "utf-8"
+        # localhost/127.0.0.1을 프록시로 보내지 않도록 (Ollama 등 로컬 서비스 연결 실패 방지)
+        no_proxy = env.get("NO_PROXY", "") or env.get("no_proxy", "")
+        env["NO_PROXY"] = f"localhost,127.0.0.1,.local{',' + no_proxy if no_proxy else ''}"
         kwargs: dict = {
             "cwd": str(PROJECT_ROOT),
             "env": env,
@@ -82,8 +85,8 @@ class ServerManager:
             "encoding": "utf-8",
             "errors": "replace",
         }
-        if sys.platform == "win32" and hasattr(subprocess, "CREATE_NO_WINDOW"):
-            kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+        # CREATE_NO_WINDOW 사용 시 Windows에서 서브프로세스의 localhost(127.0.0.1) 루프백 연결이
+        # 세션 격리로 차단되는 경우 있음 (Ollama 연결 실패). 따라서 플래그 제거.
         try:
             self._process = subprocess.Popen(cmd, **kwargs)
         except OSError as e:

@@ -71,6 +71,7 @@ curl -X POST http://127.0.0.1:8081/api/ask -H "Content-Type: application/json" -
 | 1 | FastAPI 앱 및 POST /api/ask 엔드포인트, core/rag 연동 | [x] |
 | 2 | Uvicorn 서브프로세스 제어 (server_manager.py) | [x] |
 | 3 | 서버 서비스 탭 UI (설정/버튼/LED/로그) | [x] |
+| 3-1 | 서버 시작 시 모델 사전 로드 (bge-m3, FAISS, Ollama) | [x] |
 | 4 | Web Client (채팅 UI, fetch API, 출처 카드 뷰) | [ ] |
 | 5 | main_window 탭 통합 및 통합 테스트 | [ ] |
 | 6 | V4 통합 검증 및 문서화 | [ ] |
@@ -269,7 +270,7 @@ Admin UI에 [서버 서비스 탭]을 추가한다. 호스트·포트 설정, [�
 - [x] LED 인디케이터 구현
 - [x] 실시간 로그 출력창 구현
 - [x] ServerManager 연동
-- [ ] 수동 검증 완료
+- [x] 수동 검증 완료
 
 ### Phase 3 완료 시 커밋
 
@@ -278,6 +279,83 @@ feat(ui): Phase 3 — 서버 서비스 탭 UI
 
 - tab_server_service.py 신규
 - ServerManager 연동
+```
+
+---
+
+## Phase 3-1: 서버 시작 시 모델 사전 로드
+
+### 목표
+
+[서버 시작] 클릭 시 API 서버뿐 아니라 bge-m3, FAISS 인덱스, Ollama 모델까지 사전 로드한다. 첫 /api/ask 요청 시 대기 시간을 없애고, 로그에 모델 로드 진행 상황을 표시한다.
+
+### 작업 내용
+
+1. **`src/server/api_server.py` 수정**
+
+   - FastAPI `lifespan` 훅 추가
+   - 서버 시작 시 순차 실행:
+     1. bge-m3 임베딩 모델 로드 (`preload_model`)
+     2. FAISS 인덱스 + RAG 파이프라인 로드 (`_get_pipeline`)
+     3. Ollama LLM 모델 로드 (`OllamaClient.load_model`)
+   - 각 단계별 로그 출력:
+     - `INFO: bge-m3 임베딩 모델 로딩 중...` / `bge-m3 로드 완료`
+     - `INFO: FAISS 인덱스 로딩 중...` / `FAISS 인덱스 로드 완료`
+     - `INFO: Ollama 모델 로딩 중...` / `Ollama 모델 로드 완료`
+   - 로드 실패 시 WARNING 로그만 출력, 첫 요청 시 재시도 (기존 lazy 로드 유지)
+
+2. **로그 표시**
+
+   - lifespan 내부 `print` → 서브프로세스 stdout → ServerManager 파이프 → 탭 로그창
+   - 기존 시간 정보 `[HH:MM:SS]` 형식 그대로 적용
+
+3. **bge-m3 로딩 진행도 로그 억제**
+
+   - `embedding_bge.py` 모듈 로드 시 `TQDM_DISABLE=1`, `TRANSFORMERS_VERBOSITY=error` 환경 변수 설정
+   - "Loading weights" tqdm 진행 바 출력 억제 → `bge-m3 임베딩 모델 로딩 중...` / `bge-m3 로드 완료` 로그만 표시
+
+4. **창 닫기 시 서버 종료 확인 팝업**
+
+   - `main_window.py`에 `closeEvent` 오버라이드
+   - 서버 실행 중 X 버튼으로 창 닫기 시 → "서버가 실행중입니다. 서버를 종료할까요?" 팝업
+   - 예 → 서버 중단 후 창 닫기 / 아니오 → 창 유지
+
+### Phase 3-1에서 다루는 소스
+
+| 파일 | 내용 |
+|------|------|
+| `src/server/api_server.py` | lifespan, 모델 사전 로드 |
+| `src/core/embedding_bge.py` | TQDM/transformers 로그 억제 |
+| `src/ui/main_window.py` | closeEvent, 서버 종료 확인 팝업 |
+
+### 수동 검증 방법
+
+1. Admin UI [서버 서비스] 탭에서 [서버 시작] 클릭
+2. 로그창에서 `bge-m3 로딩 중...` → `로드 완료` 순서 확인 (Loading weights 진행 바 미출력)
+3. `FAISS 인덱스 로딩 중...` → `로드 완료` 확인
+4. `Ollama 모델 로딩 중...` → `로드 완료` 확인
+5. Uvicorn `Application startup complete` 이후 첫 /api/ask 요청이 지연 없이 응답하는지 확인
+6. 서버 실행 중 메인 윈도우 X 버튼 클릭 → "서버를 종료할까요?" 팝업 확인, 예/아니오 동작 검증
+
+### 진도 체크
+
+- [x] api_server lifespan 추가
+- [x] bge-m3 사전 로드 및 로그
+- [x] bge-m3 로딩 진행도 로그 억제 (TQDM_DISABLE, TRANSFORMERS_VERBOSITY)
+- [x] FAISS 인덱스 사전 로드 및 로그
+- [x] Ollama 모델 사전 로드 및 로그
+- [x] 창 닫기 시 서버 종료 확인 팝업
+- [x] 수동 검증 완료
+
+### Phase 3-1 완료 시 커밋
+
+```
+feat(server): Phase 3-1 — 서버 시작 시 모델 사전 로드
+
+- api_server: lifespan으로 bge-m3, FAISS, Ollama 사전 로드
+- 로그에 모델 로드 진행 상황 표시
+- embedding_bge: bge-m3 로딩 시 TQDM/transformers 진행 로그 억제
+- main_window: 창 닫기 시 서버 실행 중이면 종료 확인 팝업
 ```
 
 ---
@@ -522,6 +600,7 @@ docs: Phase 6 — V4 통합 검증 및 문서화
 | 1 | `src/server/api_server.py`, `src/rag/rag_pipeline.py` | goal_v4.md §2-2 |
 | 2 | `src/server/server_manager.py` | goal_v4.md §2-1, §4 |
 | 3 | `src/ui/tabs/tab_server_service.py`, `src/server/server_manager.py` | goal_v4.md §2-1 |
+| 3-1 | `src/server/api_server.py` | phase_v4.md Phase 3-1 |
 | 4 | `web_client/`, `src/server/api_server.py` | goal_v4.md §2-3 |
 | 5 | `src/ui/main_window.py`, `src/ui/tabs/tab_server_service.py` | goal_v4.md §3, §4 |
 | 6 | `readme.md`, `phase_v4.md`, `requirements.txt` | goal_v4.md §7 |

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import requests
 
-DEFAULT_BASE_URL = "http://localhost:11434"
+# 127.0.0.1 사용: Windows 서브프로세스에서 localhost가 IPv6(::1)로 해석되어 연결 실패하는 경우 방지
+DEFAULT_BASE_URL = "http://127.0.0.1:11434"
 DEFAULT_MODEL = "qwen2.5:7b-instruct"
 DEFAULT_TEMPERATURE = 0.3
 DEFAULT_NUM_CTX = 4096
