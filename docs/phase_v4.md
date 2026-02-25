@@ -75,8 +75,8 @@ curl -X POST http://127.0.0.1:8081/api/ask -H "Content-Type: application/json" -
 | 3-2 | 동시 요청 개수 제한 (큐 대기·순차 처리·거절 안내) | [x] |
 | 4 | Web Client (채팅 UI, fetch API, 출처 카드 뷰) | [x] |
 | 5 | PDF 이미지 서빙 및 웹 뷰어 (2분할, 출처 클릭 시 이미지 표시) | [x] |
-| 6 | main_window 탭 통합 및 통합 테스트 | [ ] |
-| 7 | V4 통합 검증 및 문서화 | [ ] |
+| 6 | main_window 탭 통합 및 통합 테스트 | [x] |
+| 7 | V4 통합 검증 및 문서화 | [x] |
 
 각 Phase의 **진도 체크** 항목을 검증 후 `[ ]` → `[x]`로 바꾸고, 위 표의 완료도 필요 시 갱신한다.
 
@@ -696,9 +696,9 @@ main_window에 [서버 서비스 탭]을 추가하고, 탭 순서 및 기본 탭
 
 - [x] main_window 탭 순서 설정 (서버 서비스 → 사용 → DB 생성, 이미 반영됨)
 - [x] [서버 서비스] 기본 탭 (첫 탭으로 이미 적용)
-- [ ] 서버 시작 → Web Client 질의 → 출처 팝업까지 전체 흐름 수동 검증
-- [ ] [사용 탭], [DB 생성 탭] 기존 기능 유지 확인
-- [ ] 수동 검증 완료
+- [x] 서버 시작 → Web Client 질의 → 출처 팝업까지 전체 흐름 수동 검증
+- [x] [사용 탭], [DB 생성 탭] 기존 기능 유지 확인
+- [x] 수동 검증 완료 (Phase 5·6 종결)
 
 ### Phase 6 완료 시 커밋
 
@@ -780,23 +780,29 @@ V4 완료 기준(goal_v4.md §7)을 충족하는지 검증하고, 문서를 정�
 
 ### 진도 체크
 
-- [ ] [서버 서비스 탭] 서버 시작/중단 정상 동작
-- [ ] POST /api/ask 답변 및 sources 정상 반환
-- [ ] Web Client 채팅 질의응답 가능
-- [ ] 출처 카드 뷰 정상 표시
-- [ ] 실시간 로그 출력 동작
-- [ ] 기존 [사용 탭], [DB 생성 탭] 기능 유지
-- [ ] `readme.md` 갱신
-- [ ] `phase_v4.md` 진도 반영
-- [ ] requirements.txt 의존성 반영
+- [x] [서버 서비스 탭] 서버 시작/중단 정상 동작
+- [x] POST /api/ask 답변 및 sources 정상 반환
+- [x] Web Client 채팅 질의응답 가능
+- [x] 출처 카드 뷰 및 출처 클릭 시 팝업 이미지 표시
+- [x] 실시간 로그 출력 동작
+- [x] 기존 [사용 탭], [DB 생성 탭] 기능 유지
+- [x] `readme.md` 갱신 (V4 구조, 실행 방법, Web Client 접속)
+- [x] `phase_v4.md` 진도 반영 (Phase 5·6·7 종결)
+- [x] requirements.txt 의존성 반영 (uvicorn, fastapi)
+
+### Phase 7 종결 요약
+
+- 통합 검증 기준 충족 (서버 탭, API, Web Client, 출처 팝업, 로그, 기존 탭 유지).
+- `readme.md`에 V4 현황, 실행 방법, Web Client 접속, 디렉터리 구조 반영.
+- `requirements.txt`에 fastapi, uvicorn 추가.
 
 ### Phase 7 완료 시 커밋
 
 ```
-docs: Phase 7 — V4 통합 검증 및 문서화
+docs: Phase 7 — V4 통합 검증 및 문서화 (종결)
 
 - readme.md: V4 구조, API, Web Client 사용법 갱신
-- phase_v4.md: Phase 7 진도 반영
+- phase_v4.md: Phase 5·6·7 진도 반영
 - requirements.txt: uvicorn, fastapi 추가
 ```
 

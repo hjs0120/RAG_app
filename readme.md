@@ -1,6 +1,53 @@
 # RAG_app — PDF 규격문서 RAG 워크벤치
 
-PySide6 기반 데스크톱 앱. PDF 규격문서에서 텍스트를 추출하고, Chunk 생성·임베딩·FAISS 검색을 거쳐 **Ollama LLM**과 연동하여 RAG 답변을 생성한다.
+PySide6 기반 데스크톱 앱. PDF 규격문서에서 텍스트를 추출하고, Chunk 생성·임베딩·FAISS 검색을 거쳐 **Ollama LLM**과 연동하여 RAG 답변을 생성한다. **V4**부터 REST API 서버 + Web Client로 브라우저에서도 질의응답 가능.
+
+---
+
+## V4 개발 현황 (완료)
+
+| Phase | 내용 | 완료 |
+|-------|------|:----:|
+| 1 | FastAPI 앱 및 POST /api/ask, core/rag 연동 | [x] |
+| 2 | Uvicorn 서브프로세스 제어 (server_manager.py) | [x] |
+| 3 | 서버 서비스 탭 UI (설정/버튼/LED/로그) | [x] |
+| 3-1 | 서버 시작 시 모델 사전 로드 (bge-m3, FAISS, Ollama) | [x] |
+| 3-2 | 동시 요청 개수 제한 (큐·순차 처리·거절 안내) | [x] |
+| 4 | Web Client (채팅 UI, fetch API, 출처 카드) | [x] |
+| 5 | PDF 이미지 서빙 및 출처 팝업 뷰어 | [x] |
+| 6 | main_window 탭 통합 및 통합 테스트 | [x] |
+| 7 | V4 통합 검증 및 문서화 | [x] |
+
+### V4 실행 방법
+
+1. **Admin UI에서 서버 시작**  
+   `python -m src.app` → [서버 서비스] 탭 → [서버 시작]
+
+2. **Web Client 접속**  
+   브라우저에서 `http://127.0.0.1:8081/web_client/` 접속 후 질문 입력
+
+3. **API 직접 호출**  
+   ```bash
+   curl -X POST http://127.0.0.1:8081/api/ask -H "Content-Type: application/json" -d "{\"query\": \"제101조 내용은?\", \"top_k\": 5}"
+   ```
+
+### V4 디렉터리 구조
+
+```
+src/server/                  # V4 신규
+├── api_server.py            # FastAPI 앱, /api/ask, /view/images, web_client 서빙
+└── server_manager.py        # Uvicorn 서브프로세스 제어
+src/ui/tabs/
+├── tab_server_service.py    # V4 신규 — 서버 시작/중단, 로그
+├── tab_usage.py
+├── tab_db_create.py
+└── tab_review.py
+web_client/                  # V4 신규
+├── index.html
+├── style.css
+└── app.js
+storage/pdf_images/          # V4 Phase 5 — PDF 페이지 이미지 (doc_id별)
+```
 
 ---
 
@@ -70,8 +117,13 @@ PDF
 
 ```bash
 pip install -r requirements.txt
+# V4: Admin UI + 서버 제어 (권장)
+python -m src.app
+# 또는 V3 방식
 python src/app.py
 ```
+
+**V4 Web Client 사용 시**: Admin UI [서버 서비스] 탭에서 [서버 시작] 후 브라우저에서 `http://127.0.0.1:8081/web_client/` 접속.
 
 **RAG 사용 전 준비**
 
@@ -140,6 +192,8 @@ docs/                         # phase_v3.md, setup.md, ollama_setup.md 등
 
 | 문서 | 내용 |
 |------|------|
+| `docs/phase_v4.md` | V4 Phase 1~7 단계별 개발 계획 및 진도 |
+| `docs/goal_v4.md` | V4 설계 목표 (REST API, Web Client, PDF 이미지 뷰어) |
 | `phase_v3.md` | V3 Phase 1~7 단계별 개발 계획 및 진도 |
 | `goal_v3.md` | V3 설계 목표 및 핵심 원칙 |
 | `phase_v2.md` | V2 Phase 1~10 단계별 개발 계획 및 진도 |
