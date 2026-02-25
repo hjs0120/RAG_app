@@ -3,3 +3,6 @@ PySide6>=6.6.0
 sentence-transformers>=2.2.0
 huggingface_hub>=0.20.0
 requests>=2.28.0
+# V4: REST API 서버
+fastapi>=0.100.0
+uvicorn>=0.22.0

@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
+
+# bge-m3 로딩 시 "Loading weights" 진행 바 로그 억제
+os.environ.setdefault("TQDM_DISABLE", "1")
+os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
 
 import numpy as np
 from typing import TYPE_CHECKING
