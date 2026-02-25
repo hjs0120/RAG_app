@@ -73,9 +73,10 @@ curl -X POST http://127.0.0.1:8081/api/ask -H "Content-Type: application/json" -
 | 3 | 서버 서비스 탭 UI (설정/버튼/LED/로그) | [x] |
 | 3-1 | 서버 시작 시 모델 사전 로드 (bge-m3, FAISS, Ollama) | [x] |
 | 3-2 | 동시 요청 개수 제한 (큐 대기·순차 처리·거절 안내) | [x] |
-| 4 | Web Client (채팅 UI, fetch API, 출처 카드 뷰) | [ ] |
-| 5 | main_window 탭 통합 및 통합 테스트 | [ ] |
-| 6 | V4 통합 검증 및 문서화 | [ ] |
+| 4 | Web Client (채팅 UI, fetch API, 출처 카드 뷰) | [x] |
+| 5 | PDF 이미지 서빙 및 웹 뷰어 (2분할, 출처 클릭 시 이미지 표시) | [ ] |
+| 6 | main_window 탭 통합 및 통합 테스트 | [ ] |
+| 7 | V4 통합 검증 및 문서화 | [ ] |
 
 각 Phase의 **진도 체크** 항목을 검증 후 `[ ]` → `[x]`로 바꾸고, 위 표의 완료도 필요 시 갱신한다.
 
@@ -505,13 +506,13 @@ feat(server): Phase 3-2 — 동시 요청 개수 제한
 
 ### 진도 체크
 
-- [ ] `web_client/index.html` 채팅 UI
-- [ ] `web_client/app.js` fetch API 연동
-- [ ] `web_client/style.css` 스타일
-- [ ] 출처 카드 뷰 (structure_path, file_name, page)
-- [ ] 로딩 표시
-- [ ] 에러 처리
-- [ ] api_server 정적 파일 서빙
+- [x] `web_client/index.html` 채팅 UI
+- [x] `web_client/app.js` fetch API 연동
+- [x] `web_client/style.css` 스타일
+- [x] 출처 카드 뷰 (structure_path, file_name, page)
+- [x] 로딩 표시
+- [x] 에러 처리 (네트워크/API/Phase 3-2 rejected)
+- [x] api_server 정적 파일 서빙
 - [ ] 수동 검증 완료
 
 ### Phase 4 완료 시 커밋
@@ -526,7 +527,111 @@ feat(web): Phase 4 — Web Client 채팅 UI
 
 ---
 
-## Phase 5: main_window 탭 통합 및 통합 테스트
+## Phase 5: PDF 이미지 서빙 및 웹 뷰어
+
+### 목표
+
+출처(Source)에 해당하는 PDF 페이지를 웹에서 이미지로 볼 수 있도록 한다. 서버는 PDF를 미리 이미지로 변환·저장하고, API 응답에 이미지 URL을 포함하며, Web Client는 좌우 2분할(Split View)에서 출처 클릭 시 우측 뷰어에 해당 페이지 이미지를 표시한다.
+
+### 🛠️ PDF 이미지 서빙 아키텍처 설계
+
+#### 1. 백엔드: PDF 페이지 이미지화 전략
+
+- 서버 실행 시나 DB 생성 시점에 미리 이미지를 만들어 두는 것이 성능상 유리하다.
+- **이미지 생성**: PyMuPDF(fitz)로 PDF 각 페이지를 `.png` 또는 `.jpg`로 변환한다.
+- **해상도**: 웹에서 글자가 읽힐 정도인 **DPI 150~200** 정도가 적당하다.
+- **저장 구조**:
+  ```
+  /storage/pdf_images/
+    └── {doc_id}/
+          ├── 1.jpg
+          ├── 2.jpg
+          └── ...
+  ```
+- **정적 파일 서빙**: FastAPI에서 `StaticFiles`로 해당 폴더를 노출한다.
+  ```python
+  from fastapi.staticfiles import StaticFiles
+  app.mount("/view/images", StaticFiles(directory="storage/pdf_images"), name="images")
+  ```
+
+#### 2. API 응답 데이터 확장
+
+- 기존에는 출처에 page 번호만 보냈다면, 이제는 **해당 페이지의 이미지 URL**을 함께 포함한다.
+- **응답 예시**:
+  ```json
+  {
+    "answer": "해당 규정에 따르면...",
+    "sources": [
+      {
+        "doc_id": "rules_2024",
+        "page": 45,
+        "image_url": "http://api.server.com/view/images/rules_2024/45.jpg",
+        "text": "제 3조..."
+      }
+    ]
+  }
+  ```
+
+#### 3. 웹 클라이언트 UI 구성
+
+- **좌우 2분할(Split View)** 구조로 설계한다.
+- **좌측 (Chat Area)**: 질문·답변, 출처 버튼/카드가 나열된다.
+- **우측 (Viewer Area)**: 평소에는 비어 있거나 안내 문구만 있다가, **출처를 클릭하면** `<img>`의 `src`를 해당 `image_url`로 바꿔 해당 페이지 이미지를 보여준다.
+
+### 🚀 구현 시 고려할 디테일
+
+1. **하이라이트 표시 (Bbox)**  
+   페이지만이 아니라 근거 문장에 **노란색 박스(Highlight)**를 넣고 싶다면:
+   - **백엔드**: 이미지 URL과 함께 해당 텍스트의 bbox 좌표(V3에서 이미 추출)를 전달한다.
+   - **프론트엔드**: 이미지 위에 `position: absolute`인 투명 div를 두고, 좌표만큼 덮어 씌운다.
+
+2. **보안 및 권한**  
+   URL로 모든 페이지를 열람하는 것이 부담된다면, FastAPI의 `FileResponse`로 **요청 시점에 인증 토큰을 검사**한 뒤 이미지를 바이너리로 전달하는 방식을 쓸 수 있다.
+
+3. **저장 용량 최적화**  
+   PNG보다 **JPG (quality 80)**를 권장한다. 텍스트 위주 문서는 용량이 줄면서도 가독성을 유지한다.
+
+### 개발 로드맵 (Phase 5 세부 작업)
+
+| 순서 | 구분 | 내용 |
+|------|------|------|
+| 1 | Backend | PDF를 이미지로 변환하는 유틸리티 클래스 작성 (`pdf_to_images.py`) |
+| 2 | Backend | FastAPI 정적 파일 경로 설정 및 API 응답 스키마 수정 (sources에 `image_url` 등) |
+| 3 | Web | 2분할 레이아웃 HTML/CSS 구현 (좌: 채팅, 우: 뷰어) |
+| 4 | Web | 출처 클릭 시 우측 `<img>`의 `src`를 해당 `image_url`로 업데이트하는 JS 이벤트 리스너 |
+
+### Phase 5에서 다루는 소스
+
+| 파일/디렉터리 | 내용 |
+|---------------|------|
+| `src/core/pdf_to_images.py` (신규) 또는 `src/server/` | PDF → 이미지 변환 유틸리티 |
+| `storage/pdf_images/` (또는 `output/pdf_images/`) | doc_id별 페이지 이미지 저장 |
+| `src/server/api_server.py` | `/view/images` 마운트, sources 스키마에 `image_url` 추가 |
+| `web_client/index.html`, `style.css` | 2분할 레이아웃 |
+| `web_client/app.js` | 출처 클릭 → 뷰어 영역에 이미지 표시 |
+
+### 진도 체크
+
+- [ ] PDF → 이미지 변환 유틸리티 클래스 (PyMuPDF, DPI 150~200, JPG quality 80)
+- [ ] 저장 경로 `storage/pdf_images/{doc_id}/` 및 정적 서빙 `/view/images`
+- [ ] API 응답 sources에 `image_url` (또는 page 기반 URL 조합) 포함
+- [ ] Web Client 2분할 레이아웃 (좌: 채팅, 우: 뷰어)
+- [ ] 출처 클릭 시 우측 뷰어에 해당 페이지 이미지 표시
+- [ ] (선택) bbox 하이라이트, (선택) 인증 기반 FileResponse
+
+### Phase 5 완료 시 커밋
+
+```
+feat(web): Phase 5 — PDF 이미지 서빙 및 웹 뷰어
+
+- pdf_to_images 유틸, storage/pdf_images 구조
+- api_server: /view/images 마운트, sources에 image_url
+- web_client: 2분할 레이아웃, 출처 클릭 시 이미지 표시
+```
+
+---
+
+## Phase 6: main_window 탭 통합 및 통합 테스트
 
 ### 목표
 
@@ -555,7 +660,7 @@ main_window에 [서버 서비스 탭]을 추가하고, 탭 순서 및 기본 탭
    - 이미 실행 중인 서버에 다시 시작 시도 → 적절한 처리
    - Web Client에서 서버 중단 상태로 질문 → 에러 메시지 확인
 
-### Phase 5에서 다루는 소스
+### Phase 6에서 다루는 소스
 
 | 파일 | 내용 |
 |------|------|
@@ -579,10 +684,10 @@ main_window에 [서버 서비스 탭]을 추가하고, 탭 순서 및 기본 탭
 - [ ] [사용 탭], [DB 생성 탭] 기존 기능 유지 확인
 - [ ] 수동 검증 완료
 
-### Phase 5 완료 시 커밋
+### Phase 6 완료 시 커밋
 
 ```
-feat(ui): Phase 5 — main_window 탭 통합
+feat(ui): Phase 6 — main_window 탭 통합
 
 - main_window: [서버 서비스] 탭 추가, 기본 탭 설정
 - 통합 테스트 완료
@@ -590,7 +695,7 @@ feat(ui): Phase 5 — main_window 탭 통합
 
 ---
 
-## Phase 6: V4 통합 검증 및 문서화
+## Phase 7: V4 통합 검증 및 문서화
 
 ### 목표
 
@@ -639,7 +744,7 @@ V4 완료 기준(goal_v4.md §7)을 충족하는지 검증하고, 문서를 정�
    └── app.js
    ```
 
-### Phase 6에서 다루는 소스
+### Phase 7에서 다루는 소스
 
 | 파일 | 내용 |
 |------|------|
@@ -669,13 +774,13 @@ V4 완료 기준(goal_v4.md §7)을 충족하는지 검증하고, 문서를 정�
 - [ ] `phase_v4.md` 진도 반영
 - [ ] requirements.txt 의존성 반영
 
-### Phase 6 완료 시 커밋
+### Phase 7 완료 시 커밋
 
 ```
-docs: Phase 6 — V4 통합 검증 및 문서화
+docs: Phase 7 — V4 통합 검증 및 문서화
 
 - readme.md: V4 구조, API, Web Client 사용법 갱신
-- phase_v4.md: Phase 6 진도 반영
+- phase_v4.md: Phase 7 진도 반영
 - requirements.txt: uvicorn, fastapi 추가
 ```
 
@@ -691,7 +796,8 @@ docs: Phase 6 — V4 통합 검증 및 문서화
 | 3-1 | `src/server/api_server.py` | phase_v4.md Phase 3-1 |
 | 3-2 | `src/server/api_server.py`, `web_client/app.js` | phase_v4.md Phase 3-2 |
 | 4 | `web_client/`, `src/server/api_server.py` | goal_v4.md §2-3 |
-| 5 | `src/ui/main_window.py`, `src/ui/tabs/tab_server_service.py` | goal_v4.md §3, §4 |
-| 6 | `readme.md`, `phase_v4.md`, `requirements.txt` | goal_v4.md §7 |
+| 5 | `pdf_to_images`, `storage/pdf_images`, `api_server`, `web_client` | goal_v4.md §8, phase_v4.md Phase 5 |
+| 6 | `src/ui/main_window.py`, `src/ui/tabs/tab_server_service.py` | goal_v4.md §3, §4 |
+| 7 | `readme.md`, `phase_v4.md`, `requirements.txt` | goal_v4.md §7 |
 
 매 Phase는 위 표에 해당하는 파일만 열어 작업하면 토큰 사용을 최소화할 수 있다.

@@ -10,6 +10,8 @@ from typing import Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 # 프로젝트 루트
@@ -55,6 +57,11 @@ async def _lifespan(app: FastAPI):
 
 
 app = FastAPI(title="RAG API", version="0.1.0", lifespan=_lifespan)
+
+# Phase 4: Web Client 정적 파일 서빙
+_web_client_dir = PROJECT_ROOT / "web_client"
+if _web_client_dir.is_dir():
+    app.mount("/web_client", StaticFiles(directory=str(_web_client_dir), html=True), name="web_client")
 
 # CORS: Web Client 도메인 허용
 app.add_middleware(
@@ -187,6 +194,12 @@ def _ensure_worker_started() -> None:
 
 
 # --- 엔드포인트 ---
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon() -> Response:
+    """브라우저 기본 favicon 요청 시 404 대신 204 반환."""
+    return Response(status_code=204)
 
 
 @app.get("/health")

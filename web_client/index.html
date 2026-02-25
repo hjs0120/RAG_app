@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RAG 질의응답</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="header">
+    <h1>규칙 문서 RAG</h1>
+    <div class="server-config">
+      <label for="serverUrl">서버 URL</label>
+      <input type="text" id="serverUrl" value="http://127.0.0.1:8081" placeholder="http://127.0.0.1:8081">
+    </div>
+  </header>
+
+  <main class="main">
+    <div id="messages" class="messages" role="log" aria-live="polite"></div>
+    <div class="input-area">
+      <textarea id="queryInput" rows="2" placeholder="질문을 입력하세요..." maxlength="2000"></textarea>
+      <button type="button" id="sendBtn" class="send-btn" aria-label="전송">전송</button>
+    </div>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
