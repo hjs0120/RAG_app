@@ -72,6 +72,7 @@ curl -X POST http://127.0.0.1:8081/api/ask -H "Content-Type: application/json" -
 | 2 | Uvicorn 서브프로세스 제어 (server_manager.py) | [x] |
 | 3 | 서버 서비스 탭 UI (설정/버튼/LED/로그) | [x] |
 | 3-1 | 서버 시작 시 모델 사전 로드 (bge-m3, FAISS, Ollama) | [x] |
+| 3-2 | 동시 요청 개수 제한 (큐 대기·순차 처리·거절 안내) | [x] |
 | 4 | Web Client (채팅 UI, fetch API, 출처 카드 뷰) | [ ] |
 | 5 | main_window 탭 통합 및 통합 테스트 | [ ] |
 | 6 | V4 통합 검증 및 문서화 | [ ] |
@@ -360,6 +361,93 @@ feat(server): Phase 3-1 — 서버 시작 시 모델 사전 로드
 
 ---
 
+## Phase 3-2: 동시 요청 개수 제한 (큐 대기·순차 처리·거절 안내)
+
+### 목표
+
+서버 실행 후 여러 Web Client가 동시에 접속했을 때 최대 동시 요청 개수를 제한한다. 초과 요청은 큐에 최대 N개까지 대기시키고, 큐도 가득 찬 경우에는 즉시 거절·안내한다. 큐에 쌓인 요청은 선입선출(FIFO)로 순차 처리하며, 대기 중인 클라이언트에는 남은 순서·상태를 안내한다.
+
+### 동작 시나리오 예시
+
+- **제한**: 동시 처리 1개, 큐 최대 3개 (총 4개까지 수용 가능)
+- **5명의 클라이언트**가 순차적으로 질문을 보낸 경우:
+  - 1번 요청: 즉시 처리 시작
+  - 2·3·4번 요청: 큐에 대기, "앞에서 온 질문을 먼저 처리 중입니다. 잠시만 기다려주세요" + 남은 처리 순서 안내
+  - 5번 요청: 큐 초과 → 즉시 거절, "서버가 혼잡하여 잠시 후에 이용해 주세요" 응답
+  - 1번 완료 → 2번 처리 시작 시, 2번 클라이언트는 실제 답변 수신 / 3·4번은 대기 메시지 유지 및 순서 갱신
+  - 순차 완료 시마다 대기 클라이언트들에게 남은 순서 안내 (예: "곧 처리됩니다. 대기 순서: 2번째" 등)
+
+### 작업 내용
+
+1. **`src/server/api_server.py` 수정**
+
+   - 설정: `MAX_QUEUE_SIZE` (큐 최대 개수, 기본 3), `MAX_CONCURRENT` (동시 처리 개수, 기본 1)
+   - 요청 큐 구조: `asyncio.Queue` 또는 threading 기반 큐
+   - 슬롯 관리: 현재 처리 중 개수 + 큐 대기 개수 ≤ `MAX_QUEUE_SIZE` + `MAX_CONCURRENT` 만 수용
+   - 초과 요청: 즉시 `status="rejected"`, `answer="서버가 혼잡하여 잠시 후에 이용해 주세요."` 반환
+
+2. **큐 대기 중 클라이언트 응답**
+
+   - 대기 요청: 동기 응답 대신 스트리밍 또는 폴링 방식 중 선택
+   - **옵션 A**: SSE(Server-Sent Events)로 상태 업데이트 (대기 중 / 순서 N번째 / 답변 도착)
+   - **옵션 B**: 단일 응답에서 `status="queued"`, `queue_position=N`, `message="앞에서 온 질문을 먼저 처리 중입니다. 잠시만 기다려주세요."` 반환 후, 클라이언트가 별도 폴링으로 완료 여부 조회
+   - 순차 처리 완료 시 해당 클라이언트에게만 실제 `answer`, `sources` 전달
+
+3. **API 응답 스펙 확장**
+
+   - `status`: `"success"` | `"error"` | `"rejected"` | `"queued"`
+   - `queue_position`: (옵션) 대기 중일 때 남은 순서
+   - `message`: 거절/대기 안내 문구 (예: "서버가 혼잡하여 잠시 후에 이용해 주세요", "앞에서 온 질문을 먼저 처리 중입니다. 잠시만 기다려주세요. 대기 순서: 2번째")
+
+4. **Web Client 연동 (Phase 4 연계)**
+
+   - `status="rejected"` → 사용자에게 거절 메시지 표시
+   - `status="queued"` → 대기 메시지 + 순서 안내 표시, 필요 시 폴링/SSE로 완료 시점까지 갱신
+   - `status="success"` → 기존과 동일하게 답변·출처 표시
+
+5. **서버 설정 UI (선택)**
+
+   - `tab_server_service.py`에 큐 크기/동시 처리 수 설정 입력 추가 (기본값으로도 가능)
+
+### Phase 3-2에서 다루는 소스
+
+| 파일 | 내용 |
+|------|------|
+| `src/server/api_server.py` | 큐 관리, 요청 수 제한, 거절·대기 응답 |
+| `web_client/app.js` | status별 UI 처리 (거절/대기/성공) |
+| `src/ui/tabs/tab_server_service.py` | (선택) 큐 크기 설정 UI |
+
+### 수동 검증 방법
+
+1. `MAX_QUEUE_SIZE=3`, `MAX_CONCURRENT=1`로 서버 기동
+2. 5개의 클라이언트(브라우저 탭 또는 curl)에서 거의 동시에 질문 전송
+3. 5번째 요청이 즉시 `status="rejected"` 및 안내 메시지 반환 확인
+4. 2·3·4번 요청이 대기 메시지 + 순서 안내를 받는지 확인
+5. 1번 완료 → 2번 답변 수신, 3·4번 대기 메시지 갱신 확인
+6. 순차 완료 후 모든 대기 요청이 최종 답변을 수신하는지 확인
+
+### 진도 체크
+
+- [x] api_server에 요청 큐 및 슬롯 제한 로직 구현
+- [x] 초과 요청 즉시 거절 (`status="rejected"`)
+- [x] 큐 대기 요청 순차 처리 (FIFO)
+- [x] 대기 중 클라이언트에게 순서·안내 메시지 제공 (blocking 방식, 응답 시점에 답변 전달)
+- [x] Admin UI(tab_usage)에서 rejected 처리
+- [ ] Web Client에서 rejected 분기 처리 (Phase 4 구현 시 반영)
+- [x] 수동 검증 완료 (PySide6 환경에서 5개 동시 요청 시 1개 rejected 확인)
+
+### Phase 3-2 완료 시 커밋
+
+```
+feat(server): Phase 3-2 — 동시 요청 개수 제한
+
+- api_server: 요청 큐, 최대 동시 처리 제한
+- 초과 시 거절, 대기 시 순서·안내 메시지
+- Web Client: rejected/queued/success 처리
+```
+
+---
+
 ## Phase 4: Web Client (채팅 UI, fetch API, 출처 카드 뷰)
 
 ### 목표
@@ -601,6 +689,7 @@ docs: Phase 6 — V4 통합 검증 및 문서화
 | 2 | `src/server/server_manager.py` | goal_v4.md §2-1, §4 |
 | 3 | `src/ui/tabs/tab_server_service.py`, `src/server/server_manager.py` | goal_v4.md §2-1 |
 | 3-1 | `src/server/api_server.py` | phase_v4.md Phase 3-1 |
+| 3-2 | `src/server/api_server.py`, `web_client/app.js` | phase_v4.md Phase 3-2 |
 | 4 | `web_client/`, `src/server/api_server.py` | goal_v4.md §2-3 |
 | 5 | `src/ui/main_window.py`, `src/ui/tabs/tab_server_service.py` | goal_v4.md §3, §4 |
 | 6 | `readme.md`, `phase_v4.md`, `requirements.txt` | goal_v4.md §7 |

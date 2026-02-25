@@ -297,6 +297,9 @@ class APIAskWorker(QObject):
             if data.get("status") == "error":
                 self.error.emit(data.get("answer", "API 오류"))
                 return
+            if data.get("status") == "rejected":
+                self.error.emit(data.get("message") or data.get("answer", "서버가 혼잡하여 잠시 후에 이용해 주세요."))
+                return
             # API 응답 → RAGResult 형식으로 변환
             answer = data.get("answer", "")
             sources_raw = data.get("sources", [])

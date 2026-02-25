@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
+from queue import Queue
 from typing import Any
 
 from fastapi import FastAPI
@@ -105,9 +107,11 @@ class SourceItem(BaseModel):
 class AskResponse(BaseModel):
     """POST /api/ask Response."""
 
-    status: str  # "success" | "error"
+    status: str  # "success" | "error" | "rejected" | "queued"
     answer: str
-    sources: list[SourceItem]
+    sources: list[SourceItem] = []
+    queue_position: int | None = None  # 대기 중일 때 남은 순서
+    message: str | None = None  # 거절/대기 안내 문구
 
 
 def _meta_to_source_item(meta: dict[str, Any]) -> SourceItem:
@@ -122,6 +126,64 @@ def _meta_to_source_item(meta: dict[str, Any]) -> SourceItem:
         "doc_id": meta.get("doc_id") or "",  # PDF 조회용 (chunk_id와 분리)
     }
     return SourceItem(chunk_id=chunk_id, text=text, metadata=metadata)
+
+
+# --- Phase 3-2: 요청 큐 및 슬롯 제한 ---
+
+MAX_QUEUE_SIZE = 3
+MAX_CONCURRENT = 1
+_total_capacity = MAX_QUEUE_SIZE + MAX_CONCURRENT  # 4
+
+_queue: Queue[tuple[AskRequest, dict[str, AskResponse], threading.Event]] = Queue()
+_queue_lock = threading.Lock()
+_processing_count = 0
+
+
+def _process_one_ask(body: AskRequest) -> AskResponse:
+    """단일 RAG 요청 처리 (큐 외부에서 호출)."""
+    try:
+        pipeline = _get_pipeline()
+        top_k = max(1, min(20, body.top_k or FAISS_TOP_K))
+        result = pipeline.run_query(body.query, top_k=top_k)
+        sources = [_meta_to_source_item(m) for m in result.sources_meta]
+        return AskResponse(status="success", answer=result.answer, sources=sources)
+    except RuntimeError as e:
+        return AskResponse(status="error", answer=str(e), sources=[])
+    except Exception as e:
+        return AskResponse(status="error", answer=f"오류: {e}", sources=[])
+
+
+def _worker() -> None:
+    """큐에서 요청을 꺼내 순차 처리하는 워커 스레드."""
+    global _processing_count
+    while True:
+        item = _queue.get()
+        if item is None:
+            break
+        body, result_holder, evt = item
+        with _queue_lock:
+            _processing_count += 1
+        try:
+            resp = _process_one_ask(body)
+        finally:
+            with _queue_lock:
+                _processing_count -= 1
+        result_holder["response"] = resp
+        evt.set()
+
+
+_worker_thread: threading.Thread | None = None
+_worker_started = threading.Event()
+
+
+def _ensure_worker_started() -> None:
+    """워커 스레드가 없으면 시작."""
+    global _worker_thread
+    if _worker_thread is not None and _worker_thread.is_alive():
+        return
+    _worker_thread = threading.Thread(target=_worker, daemon=True)
+    _worker_thread.start()
+    _worker_started.set()
 
 
 # --- 엔드포인트 ---
@@ -139,27 +201,21 @@ def api_ask(body: AskRequest) -> AskResponse:
     RAG 질의응답.
     - query: 질문
     - top_k: 검색 Chunk 수 (기본 5)
+    Phase 3-2: 동시 요청 제한. 큐 가득 시 status="rejected" 반환.
     """
-    try:
-        pipeline = _get_pipeline()
-        top_k = max(1, min(20, body.top_k or FAISS_TOP_K))
-        result = pipeline.run_query(body.query, top_k=top_k)
+    with _queue_lock:
+        in_system = _processing_count + _queue.qsize()
+        if in_system >= _total_capacity:
+            return AskResponse(
+                status="rejected",
+                answer="서버가 혼잡하여 잠시 후에 이용해 주세요.",
+                sources=[],
+                message="서버가 혼잡하여 잠시 후에 이용해 주세요.",
+            )
+        result_holder: dict[str, AskResponse] = {}
+        evt = threading.Event()
+        _queue.put((body, result_holder, evt))
 
-        sources = [_meta_to_source_item(m) for m in result.sources_meta]
-        return AskResponse(
-            status="success",
-            answer=result.answer,
-            sources=sources,
-        )
-    except RuntimeError as e:
-        return AskResponse(
-            status="error",
-            answer=str(e),
-            sources=[],
-        )
-    except Exception as e:
-        return AskResponse(
-            status="error",
-            answer=f"오류: {e}",
-            sources=[],
-        )
+    _ensure_worker_started()
+    evt.wait()
+    return result_holder["response"]
