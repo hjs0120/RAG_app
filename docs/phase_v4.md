@@ -40,7 +40,7 @@ pip install uvicorn fastapi
 
 ```powershell
 # 방법 1: Uvicorn 직접 실행
-uvicorn src.server.api_server:app --host 127.0.0.1 --port 8000
+uvicorn src.server.api_server:app --host 127.0.0.1 --port 8081
 
 # 방법 2: Admin UI에서 [서버 서비스 탭] → [서버 시작] 클릭
 python -m src.app
@@ -50,7 +50,7 @@ python -m src.app
 
 ```powershell
 # curl 예시
-curl -X POST http://127.0.0.1:8000/api/ask -H "Content-Type: application/json" -d "{\"query\": \"제101조 내용은?\", \"top_k\": 5}"
+curl -X POST http://127.0.0.1:8081/api/ask -H "Content-Type: application/json" -d "{\"query\": \"제101조 내용은?\", \"top_k\": 5}"
 ```
 
 ### 주요 의존성 (V4 기준)
@@ -70,7 +70,7 @@ curl -X POST http://127.0.0.1:8000/api/ask -H "Content-Type: application/json" -
 |-------|------|:----:|
 | 1 | FastAPI 앱 및 POST /api/ask 엔드포인트, core/rag 연동 | [x] |
 | 2 | Uvicorn 서브프로세스 제어 (server_manager.py) | [x] |
-| 3 | 서버 서비스 탭 UI (설정/버튼/LED/로그) | [ ] |
+| 3 | 서버 서비스 탭 UI (설정/버튼/LED/로그) | [x] |
 | 4 | Web Client (채팅 UI, fetch API, 출처 카드 뷰) | [ ] |
 | 5 | main_window 탭 통합 및 통합 테스트 | [ ] |
 | 6 | V4 통합 검증 및 문서화 | [ ] |
@@ -125,8 +125,8 @@ FastAPI 앱을 정의하고, POST /api/ask 엔드포인트를 구현한다. 기�
 
 ### 수동 검증 방법
 
-1. `uvicorn src.server.api_server:app --host 127.0.0.1 --port 8000` 실행
-2. `curl -X POST http://127.0.0.1:8000/api/ask -H "Content-Type: application/json" -d "{\"query\": \"제101조\", \"top_k\": 5}"` 호출
+1. `uvicorn src.server.api_server:app --host 127.0.0.1 --port 8081` 실행
+2. `curl -X POST http://127.0.0.1:8081/api/ask -H "Content-Type: application/json" -d "{\"query\": \"제101조\", \"top_k\": 5}"` 호출
 3. Response에 `status`, `answer`, `sources` 필드 포함 여부 확인
 4. 답변 및 sources 내용이 V3 [사용 탭] 결과와 유사한지 확인
 
@@ -188,7 +188,7 @@ Admin UI에서 서버를 시작/중단할 수 있도록 Uvicorn을 서브프로�
 
 ### 수동 검증 방법
 
-1. `ServerManager` 인스턴스 생성 후 `start("127.0.0.1", 8000)` 호출
+1. `ServerManager` 인스턴스 생성 후 `start("127.0.0.1", 8081)` 호출
 2. `is_running()` → True 반환 확인
 3. `curl`로 /api/ask 호출 → 정상 응답 확인
 4. `stop()` 호출 → 프로세스 종료 확인
@@ -224,7 +224,7 @@ Admin UI에 [서버 서비스 탭]을 추가한다. 호스트·포트 설정, [�
 
    - **서버 설정 영역**
      - QLineEdit: 호스트 (기본값 127.0.0.1)
-     - QSpinBox: 포트 (기본값 8000)
+     - QSpinBox: 포트 (기본값 8081)
    - **서버 제어 영역**
      - QPushButton: [서버 시작], [서버 중단]
      - QLabel 또는 커스텀 위젯: 상태 LED 인디케이터 (녹색=실행, 회색=중지, 빨강=에러)
@@ -263,12 +263,12 @@ Admin UI에 [서버 서비스 탭]을 추가한다. 호스트·포트 설정, [�
 
 ### 진도 체크
 
-- [ ] `tab_server_service.py` 생성
-- [ ] 호스트/포트 설정 UI
-- [ ] [서버 시작]/[서버 중단] 버튼 연동
-- [ ] LED 인디케이터 구현
-- [ ] 실시간 로그 출력창 구현
-- [ ] ServerManager 연동
+- [x] `tab_server_service.py` 생성
+- [x] 호스트/포트 설정 UI
+- [x] [서버 시작]/[서버 중단] 버튼 연동
+- [x] LED 인디케이터 구현
+- [x] 실시간 로그 출력창 구현
+- [x] ServerManager 연동
 - [ ] 수동 검증 완료
 
 ### Phase 3 완료 시 커밋
@@ -297,7 +297,7 @@ feat(ui): Phase 3 — 서버 서비스 탭 UI
    - 채팅 영역: 사용자/봇 메시지 표시 (스크롤 가능)
    - 입력 영역: 텍스트 입력창 + 전송 버튼
    - 출처 영역: 답변 하단에 sources 카드 뷰 (접기/펼치기)
-   - 서버 URL 설정: 설정 가능하거나 기본값 `http://127.0.0.1:8000`
+   - 서버 URL 설정: 설정 가능하거나 기본값 `http://127.0.0.1:8081`
 
 3. **`web_client/style.css` 신규 생성**
 
@@ -317,7 +317,7 @@ feat(ui): Phase 3 — 서버 서비스 탭 UI
 
    - `api_server.py`에 `app.mount("/web_client", StaticFiles(directory="web_client"), name="web_client")` 추가
    - 또는 `/` 루트에서 `web_client/index.html` 서빙
-   - 접근 URL: `http://127.0.0.1:8000/web_client/` 또는 `http://127.0.0.1:8000/`
+   - 접근 URL: `http://127.0.0.1:8081/web_client/` 또는 `http://127.0.0.1:8081/`
 
 ### Phase 4에서 다루는 소스
 
@@ -331,7 +331,7 @@ feat(ui): Phase 3 — 서버 서비스 탭 UI
 ### 수동 검증 방법
 
 1. Admin UI에서 서버 시작 (또는 uvicorn 직접 실행)
-2. 브라우저에서 `http://127.0.0.1:8000/web_client/` 접속
+2. 브라우저에서 `http://127.0.0.1:8081/web_client/` 접속
 3. 질문 입력 후 전송 → 봇 답변 말풍선 표시 확인
 4. 출처 카드에 structure_path, file_name, page 표시 확인
 5. 로딩 중 스피너/플레이스홀더 표시 확인

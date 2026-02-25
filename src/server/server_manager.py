@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import sys
+import os
+import time
 import threading
 import subprocess
 from pathlib import Path
@@ -47,7 +49,7 @@ class ServerManager:
             except Exception:
                 pass
 
-    def start(self, host: str = "127.0.0.1", port: int = 8000) -> bool:
+    def start(self, host: str = "127.0.0.1", port: int = 8081) -> bool:
         """
         Uvicorn 서버 서브프로세스 시작.
 
@@ -68,8 +70,12 @@ class ServerManager:
             "--port",
             str(port),
         ]
+        # Windows 한글 환경: 자식 프로세스 출력을 UTF-8로 고정 (한글 깨짐 방지)
+        env = dict(os.environ)
+        env["PYTHONIOENCODING"] = "utf-8"
         kwargs: dict = {
             "cwd": str(PROJECT_ROOT),
+            "env": env,
             "stdout": subprocess.PIPE,
             "stderr": subprocess.STDOUT,
             "text": True,
@@ -90,6 +96,15 @@ class ServerManager:
         # 포트 충돌 등으로 즉시 종료된 경우
         if self._process.poll() is not None:
             self._emit_log("[ERROR] 서버가 즉시 종료되었습니다. (포트 사용 중일 수 있음)")
+            self._process = None
+            return False
+
+        # 바인드 실패(10048 등)는 uvicorn 시작 후 수 초 내에 발생 → 잠시 대기 후 재확인
+        time.sleep(2.0)
+        if self._process.poll() is not None:
+            self._emit_log(
+                "[ERROR] 서버가 종료되었습니다. 포트가 이미 사용 중인지 확인하세요. (다른 포트 시도 또는 기존 프로세스 종료)"
+            )
             self._process = None
             return False
 

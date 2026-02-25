@@ -17,8 +17,8 @@ def main():
     mgr = ServerManager()
     mgr.set_log_callback(on_log)
 
-    print("1. start(127.0.0.1, 8000)...")
-    ok = mgr.start("127.0.0.1", 8000)
+    print("1. start(127.0.0.1, 8081)...")
+    ok = mgr.start("127.0.0.1", 8081)
     assert ok, "start should return True"
     print("   OK")
 

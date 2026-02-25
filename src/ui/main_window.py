@@ -12,6 +12,7 @@ from PySide6.QtCore import Qt
 
 from src.ui.tabs.tab_usage import TabUsage
 from src.ui.tabs.tab_db_create import TabDBCreate
+from src.ui.tabs.tab_server_service import TabServerService
 
 
 def _default_output_dir() -> str:
@@ -25,7 +26,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("RAG 워크벤치 (V3)")
+        self.setWindowTitle("RAG 워크벤치 (V4)")
         self.setMinimumSize(1400, 850)
         self.resize(1920, 1080)
 
@@ -45,6 +46,7 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(central)
 
         self.tabs = QTabWidget()
+        self.tabs.addTab(TabServerService(), "서버 서비스")
         usage_tab = TabUsage(self.app_state)
         usage_tab.setMinimumSize(1200, 600)
         self.tabs.addTab(usage_tab, "사용 탭")
