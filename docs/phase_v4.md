@@ -74,7 +74,7 @@ curl -X POST http://127.0.0.1:8081/api/ask -H "Content-Type: application/json" -
 | 3-1 | 서버 시작 시 모델 사전 로드 (bge-m3, FAISS, Ollama) | [x] |
 | 3-2 | 동시 요청 개수 제한 (큐 대기·순차 처리·거절 안내) | [x] |
 | 4 | Web Client (채팅 UI, fetch API, 출처 카드 뷰) | [x] |
-| 5 | PDF 이미지 서빙 및 웹 뷰어 (2분할, 출처 클릭 시 이미지 표시) | [ ] |
+| 5 | PDF 이미지 서빙 및 웹 뷰어 (2분할, 출처 클릭 시 이미지 표시) | [x] |
 | 6 | main_window 탭 통합 및 통합 테스트 | [ ] |
 | 7 | V4 통합 검증 및 문서화 | [ ] |
 
@@ -572,11 +572,12 @@ feat(web): Phase 4 — Web Client 채팅 UI
   }
   ```
 
-#### 3. 웹 클라이언트 UI 구성
+#### 3. 웹 클라이언트 UI 구성 (구현: 팝업 방식으로 확정)
 
-- **좌우 2분할(Split View)** 구조로 설계한다.
-- **좌측 (Chat Area)**: 질문·답변, 출처 버튼/카드가 나열된다.
-- **우측 (Viewer Area)**: 평소에는 비어 있거나 안내 문구만 있다가, **출처를 클릭하면** `<img>`의 `src`를 해당 `image_url`로 바꿔 해당 페이지 이미지를 보여준다.
+- 채팅 영역은 전체 너비 사용.
+- **출처 클릭 시**: 우측 고정 패널 대신 **팝업(모달)**을 띄워 해당 페이지 이미지를 크게 표시.
+- **팝업 상단**: 출처 정보(구조 경로 · 파일명 · p.페이지)를 표기하여 이미지에서 해당 출처를 찾기 쉽게 함.
+- 닫기: × 버튼, 배경 클릭, Escape 키.
 
 ### 🚀 구현 시 고려할 디테일
 
@@ -591,42 +592,50 @@ feat(web): Phase 4 — Web Client 채팅 UI
 3. **저장 용량 최적화**  
    PNG보다 **JPG (quality 80)**를 권장한다. 텍스트 위주 문서는 용량이 줄면서도 가독성을 유지한다.
 
-### 개발 로드맵 (Phase 5 세부 작업)
+### 개발 로드맵 (Phase 5 세부 작업) — 완료 반영
 
-| 순서 | 구분 | 내용 |
-|------|------|------|
-| 1 | Backend | PDF를 이미지로 변환하는 유틸리티 클래스 작성 (`pdf_to_images.py`) |
-| 2 | Backend | FastAPI 정적 파일 경로 설정 및 API 응답 스키마 수정 (sources에 `image_url` 등) |
-| 3 | Web | 2분할 레이아웃 HTML/CSS 구현 (좌: 채팅, 우: 뷰어) |
-| 4 | Web | 출처 클릭 시 우측 `<img>`의 `src`를 해당 `image_url`로 업데이트하는 JS 이벤트 리스너 |
+| 순서 | 구분 | 내용 | 비고 |
+|------|------|------|------|
+| 1 | Backend | PDF를 이미지로 변환하는 유틸리티 (`pdf_to_images.py`, `scripts/export_pdf_images.py`) | JPG, jpg_quality, DPI 150 |
+| 2 | Backend | FastAPI `/view/images` 마운트, API 응답 sources.metadata에 `image_url` 추가 | |
+| 3 | Backend | DB 생성 탭: 임베딩 완료 시 `export_pdf_to_images` 자동 호출 (tab_db_create.py) | 띄어쓰기 파일명 대응 |
+| 4 | Web | 출처 클릭 시 **팝업**으로 페이지 이미지 표시, **상단에 출처 정보** 표기 | 2분할 → 팝업으로 변경 |
 
 ### Phase 5에서 다루는 소스
 
 | 파일/디렉터리 | 내용 |
 |---------------|------|
-| `src/core/pdf_to_images.py` (신규) 또는 `src/server/` | PDF → 이미지 변환 유틸리티 |
+| `src/core/pdf_to_images.py` (신규) | PDF → 이미지 변환 유틸리티 |
+| `src/ui/tabs/tab_db_create.py` | 임베딩 완료 시 export_pdf_to_images 호출 |
 | `storage/pdf_images/` (또는 `output/pdf_images/`) | doc_id별 페이지 이미지 저장 |
 | `src/server/api_server.py` | `/view/images` 마운트, sources 스키마에 `image_url` 추가 |
-| `web_client/index.html`, `style.css` | 2분할 레이아웃 |
-| `web_client/app.js` | 출처 클릭 → 뷰어 영역에 이미지 표시 |
+| `web_client/index.html`, `style.css` | 출처 팝업 모달 (상단 출처 문구 + 이미지) |
+| `web_client/app.js` | 출처 클릭 → 팝업 표시, 닫기(×/배경/Esc) |
 
 ### 진도 체크
 
-- [ ] PDF → 이미지 변환 유틸리티 클래스 (PyMuPDF, DPI 150~200, JPG quality 80)
-- [ ] 저장 경로 `storage/pdf_images/{doc_id}/` 및 정적 서빙 `/view/images`
-- [ ] API 응답 sources에 `image_url` (또는 page 기반 URL 조합) 포함
-- [ ] Web Client 2분할 레이아웃 (좌: 채팅, 우: 뷰어)
-- [ ] 출처 클릭 시 우측 뷰어에 해당 페이지 이미지 표시
+- [x] PDF → 이미지 변환 유틸리티 클래스 (PyMuPDF, DPI 150~200, JPG quality 80) — `src/core/pdf_to_images.py`, `scripts/export_pdf_images.py`
+- [x] 저장 경로 `storage/pdf_images/{doc_id}/` 및 정적 서빙 `/view/images`
+- [x] API 응답 sources에 `image_url` (metadata.image_url, `/view/images/{doc_id}/{page}.jpg`) 포함
+- [x] Web Client: 출처 클릭 시 **팝업**으로 페이지 이미지 표시 (우측 패널 제거)
+- [x] 팝업 상단에 출처 정보(구조 경로 · 파일명 · p.페이지) 표기
+- [x] DB 생성 시점 이미지 자동 export (tab_db_create 연동)
 - [ ] (선택) bbox 하이라이트, (선택) 인증 기반 FileResponse
+- [x] 수동 검증 완료
+
+### Phase 5 종결 요약
+
+- **구현**: pdf_to_images, DB 생성 시 자동 export, /view/images 서빙, 출처 팝업(상단 출처 표기).
+- **UI 변경**: 2분할 → 출처 클릭 시 팝업으로 확정 (가독성 개선).
 
 ### Phase 5 완료 시 커밋
 
 ```
-feat(web): Phase 5 — PDF 이미지 서빙 및 웹 뷰어
+feat(web): Phase 5 — PDF 이미지 서빙 및 웹 뷰어 (종결)
 
-- pdf_to_images 유틸, storage/pdf_images 구조
-- api_server: /view/images 마운트, sources에 image_url
-- web_client: 2분할 레이아웃, 출처 클릭 시 이미지 표시
+- pdf_to_images, storage/pdf_images, DB 생성 시 자동 export
+- api_server: /view/images, sources에 image_url
+- web_client: 출처 클릭 시 팝업(상단 출처 표기)으로 이미지 표시
 ```
 
 ---
@@ -636,6 +645,13 @@ feat(web): Phase 5 — PDF 이미지 서빙 및 웹 뷰어
 ### 목표
 
 main_window에 [서버 서비스 탭]을 추가하고, 탭 순서 및 기본 탭을 설정한다. 서버 시작 → Web Client 질의까지 전체 흐름을 통합 테스트한다.
+
+### 현재 상태 (이미 반영됨)
+
+- **`main_window.py`**에서 이미 [서버 서비스] 탭을 **첫 번째**로 추가하고, [사용 탭], [DB 생성 탭] 순으로 `addTab()` 되어 있음.
+- QTabWidget 기본 동작으로 **첫 탭(서버 서비스)**이 기본 선택됨.
+- 창 닫기 시 서버 실행 중이면 종료 확인 팝업 동작함.
+- 따라서 **별도 추가 개발 없이**, 아래 수동 검증만 진행하면 Phase 6 완료로 볼 수 있음.
 
 ### 작업 내용
 
@@ -678,9 +694,9 @@ main_window에 [서버 서비스 탭]을 추가하고, 탭 순서 및 기본 탭
 
 ### 진도 체크
 
-- [ ] main_window 탭 순서 설정
-- [ ] [서버 서비스] 기본 탭 설정
-- [ ] 서버 시작 → Web Client 질의 흐름 확인
+- [x] main_window 탭 순서 설정 (서버 서비스 → 사용 → DB 생성, 이미 반영됨)
+- [x] [서버 서비스] 기본 탭 (첫 탭으로 이미 적용)
+- [ ] 서버 시작 → Web Client 질의 → 출처 팝업까지 전체 흐름 수동 검증
 - [ ] [사용 탭], [DB 생성 탭] 기존 기능 유지 확인
 - [ ] 수동 검증 완료
 

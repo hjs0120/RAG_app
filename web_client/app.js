@@ -5,6 +5,9 @@
   const queryInput = document.getElementById("queryInput");
   const sendBtn = document.getElementById("sendBtn");
   const serverUrlInput = document.getElementById("serverUrl");
+  const sourceModal = document.getElementById("sourceModal");
+  const sourceModalCaption = document.getElementById("sourceModalCaption");
+  const sourceModalImage = document.getElementById("sourceModalImage");
 
   function getBaseUrl() {
     const url = (serverUrlInput && serverUrlInput.value || "").trim();
@@ -16,6 +19,23 @@
     const div = document.createElement("div");
     div.textContent = s;
     return div.innerHTML;
+  }
+
+  function showSourceModal(imageUrl, caption) {
+    if (!sourceModal || !sourceModalImage || !sourceModalCaption) return;
+    const base = getBaseUrl().replace(/\/$/, "");
+    const fullUrl = imageUrl.startsWith("http") ? imageUrl : base + imageUrl;
+    sourceModalCaption.textContent = caption || "출처";
+    sourceModalImage.src = fullUrl;
+    sourceModalImage.alt = caption || "출처 페이지";
+    sourceModal.style.display = "flex";
+  }
+
+  function closeSourceModal() {
+    if (sourceModal) {
+      sourceModal.style.display = "none";
+      sourceModalImage.src = "";
+    }
   }
 
   function addMessage(opts) {
@@ -62,8 +82,28 @@
             const path = meta.structure_path || "-";
             const file = meta.file_name || "-";
             const page = meta.physical_page != null ? "p." + meta.physical_page : "";
+            const imageUrl = meta.image_url || "";
+            const cardClass = "source-card" + (imageUrl ? " clickable" : "");
+            const pageNum = meta.physical_page != null ? String(meta.physical_page) : "";
+            let dataAttrs = "";
+            if (imageUrl) {
+              dataAttrs =
+                ' data-image-url="' +
+                escapeHtml(imageUrl) +
+                '" data-structure-path="' +
+                escapeHtml(path) +
+                '" data-file-name="' +
+                escapeHtml(file) +
+                '" data-page="' +
+                escapeHtml(pageNum) +
+                '"';
+            }
             return (
-              '<div class="source-card">' +
+              '<div class="' +
+              cardClass +
+              '"' +
+              dataAttrs +
+              ">" +
               '<div class="structure-path">' +
               escapeHtml(path) +
               "</div>" +
@@ -81,6 +121,17 @@
       toggle.addEventListener("click", function () {
         list.classList.toggle("collapsed");
         toggle.classList.toggle("collapsed", list.classList.contains("collapsed"));
+      });
+      list.addEventListener("click", function (e) {
+        const card = e.target && e.target.closest(".source-card.clickable");
+        if (card && card.dataset.imageUrl) {
+          const parts = [
+            card.dataset.structurePath || "",
+            card.dataset.fileName || "",
+            card.dataset.page ? "p." + card.dataset.page : "",
+          ].filter(Boolean);
+          showSourceModal(card.dataset.imageUrl, parts.join(" · "));
+        }
       });
       div.appendChild(wrap);
     }
@@ -131,8 +182,28 @@
             const path = meta.structure_path || "-";
             const file = meta.file_name || "-";
             const page = meta.physical_page != null ? "p." + meta.physical_page : "";
+            const imageUrl = meta.image_url || "";
+            const cardClass = "source-card" + (imageUrl ? " clickable" : "");
+            const pageNum = meta.physical_page != null ? String(meta.physical_page) : "";
+            let dataAttrs = "";
+            if (imageUrl) {
+              dataAttrs =
+                ' data-image-url="' +
+                escapeHtml(imageUrl) +
+                '" data-structure-path="' +
+                escapeHtml(path) +
+                '" data-file-name="' +
+                escapeHtml(file) +
+                '" data-page="' +
+                escapeHtml(pageNum) +
+                '"';
+            }
             return (
-              '<div class="source-card">' +
+              '<div class="' +
+              cardClass +
+              '"' +
+              dataAttrs +
+              ">" +
               '<div class="structure-path">' +
               escapeHtml(path) +
               "</div>" +
@@ -155,6 +226,17 @@
         toggle.addEventListener("click", function () {
           list.classList.toggle("collapsed");
           toggle.classList.toggle("collapsed", list.classList.contains("collapsed"));
+        });
+        list.addEventListener("click", function (e) {
+          const card = e.target && e.target.closest(".source-card.clickable");
+          if (card && card.dataset.imageUrl) {
+            const parts = [
+              card.dataset.structurePath || "",
+              card.dataset.fileName || "",
+              card.dataset.page ? "p." + card.dataset.page : "",
+            ].filter(Boolean);
+            showSourceModal(card.dataset.imageUrl, parts.join(" · "));
+          }
         });
       }
     }
@@ -231,4 +313,14 @@
       }
     });
   }
+
+  var closeBtn = sourceModal && sourceModal.querySelector(".source-modal-close");
+  var backdrop = sourceModal && sourceModal.querySelector(".source-modal-backdrop");
+  if (closeBtn) closeBtn.addEventListener("click", closeSourceModal);
+  if (backdrop) backdrop.addEventListener("click", closeSourceModal);
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && sourceModal && sourceModal.style.display === "flex") {
+      closeSourceModal();
+    }
+  });
 })();

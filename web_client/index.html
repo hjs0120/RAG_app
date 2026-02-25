@@ -23,6 +23,20 @@
     </div>
   </main>
 
+  <!-- 출처 클릭 시 팝업: 상단에 출처 정보, 아래에 페이지 이미지 -->
+  <div id="sourceModal" class="source-modal" role="dialog" aria-modal="true" aria-labelledby="sourceModalCaption" style="display: none;">
+    <div class="source-modal-backdrop"></div>
+    <div class="source-modal-content">
+      <div class="source-modal-header">
+        <div id="sourceModalCaption" class="source-modal-caption"></div>
+        <button type="button" class="source-modal-close" aria-label="닫기">&times;</button>
+      </div>
+      <div class="source-modal-body">
+        <img id="sourceModalImage" class="source-modal-image" alt="" src="">
+      </div>
+    </div>
+  </div>
+
   <script src="app.js"></script>
 </body>
 </html>

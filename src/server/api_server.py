@@ -23,6 +23,7 @@ from src.db.db_manager import load_index
 from src.rag.rag_pipeline import RAGPipeline
 from src.rag.rag_config import FAISS_TOP_K, DEFAULT_OLLAMA_MODEL
 from src.core.embedding_bge import preload_model
+from src.core.pdf_to_images import _safe_doc_id_dir
 from src.llm.ollama_client import OllamaClient
 
 
@@ -62,6 +63,11 @@ app = FastAPI(title="RAG API", version="0.1.0", lifespan=_lifespan)
 _web_client_dir = PROJECT_ROOT / "web_client"
 if _web_client_dir.is_dir():
     app.mount("/web_client", StaticFiles(directory=str(_web_client_dir), html=True), name="web_client")
+
+# Phase 5: PDF 페이지 이미지 서빙 (storage/pdf_images/{doc_id}/1.jpg, ...)
+_storage_images_dir = PROJECT_ROOT / "storage" / "pdf_images"
+if _storage_images_dir.is_dir():
+    app.mount("/view/images", StaticFiles(directory=str(_storage_images_dir)), name="images")
 
 # CORS: Web Client 도메인 허용
 app.add_middleware(
@@ -122,16 +128,24 @@ class AskResponse(BaseModel):
 
 
 def _meta_to_source_item(meta: dict[str, Any]) -> SourceItem:
-    """faiss meta를 SourceItem으로 변환."""
+    """faiss meta를 SourceItem으로 변환. Phase 5: image_url 추가."""
     chunk_id = meta.get("chunk_id") or ""
     text = meta.get("full_text") or meta.get("text") or ""
     sub = meta.get("meta") or {}
+    doc_id = meta.get("doc_id") or ""
+    physical_page = sub.get("physical_page")
     metadata = {
         "structure_path": sub.get("structure_path") or "",
-        "physical_page": sub.get("physical_page"),
+        "physical_page": physical_page,
         "file_name": sub.get("file_name") or "",
-        "doc_id": meta.get("doc_id") or "",  # PDF 조회용 (chunk_id와 분리)
+        "doc_id": doc_id,
     }
+    # Phase 5: 해당 페이지 이미지 URL (있으면 클라이언트에서 뷰어 표시)
+    image_url = ""
+    if doc_id and physical_page is not None:
+        safe_id = _safe_doc_id_dir(doc_id)
+        image_url = f"/view/images/{safe_id}/{int(physical_page)}.jpg"
+    metadata["image_url"] = image_url
     return SourceItem(chunk_id=chunk_id, text=text, metadata=metadata)
 
 

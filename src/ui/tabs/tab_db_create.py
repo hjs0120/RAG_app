@@ -50,6 +50,7 @@ from src.core.chunk_builder import (
     MIN_CHUNK_LEN,
 )
 from src.core.faiss_index import build_index_from_chunks
+from src.core.pdf_to_images import export_pdf_to_images
 from src.ui.tabs.tab_review import _draw_bbox_on_pixmap
 
 
@@ -70,6 +71,38 @@ def _default_output_dir(state: dict | None) -> str:
 def _doc_id_from_path(path: str) -> str:
     name = os.path.splitext(os.path.basename(path))[0]
     return name.replace(" ", "_").replace(".", "_")
+
+
+def _find_pdf_for_doc_id(pdf_folder: str | Path, doc_id: str) -> Path | None:
+    """원본 PDF 폴더에서 doc_id에 해당하는 PDF 파일 경로 반환."""
+    folder = Path(pdf_folder)
+    if not folder.is_dir() or not doc_id:
+        return None
+    cand = folder / f"{doc_id}.pdf"
+    if cand.is_file():
+        return cand
+    name_with_spaces = doc_id.replace("_", " ")
+    cand2 = folder / f"{name_with_spaces}.pdf"
+    if cand2.is_file():
+        return cand2
+    for p in folder.glob("*.pdf"):
+        if _doc_id_from_path(str(p)) == doc_id:
+            return p
+    return None
+
+
+def _try_export_pdf_images(pdf_path: Path | str, doc_id: str, label: QLabel) -> None:
+    """DB 생성 후 PDF 페이지 이미지 export. 실패 시 라벨에 경고만 표시."""
+    pdf_path = Path(pdf_path)
+    if not pdf_path.is_file() or not doc_id:
+        return
+    try:
+        out_dir = _project_root() / "storage" / "pdf_images"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        export_pdf_to_images(pdf_path, doc_id, out_dir)
+        label.setText(label.text() + " (PDF 이미지 export 완료)")
+    except Exception as e:
+        label.setText(label.text() + f" (이미지 export 경고: {e})")
 
 
 def _render_page_to_pixmap(pdf_path: str | Path, page_no: int, dpi_scale: float = 2.0) -> QPixmap | None:
@@ -1072,6 +1105,32 @@ class TabDBCreate(QWidget):
         self._btn_embedding.setEnabled(True)
         self._progress_embedding.setVisible(False)
         self._label_embedding.setText(f"저장 완료: {idx_path}, {meta_path}")
+
+        # Phase 5: DB 생성 시점에 PDF 페이지 이미지 export (웹 뷰어용)
+        chunk_path = self._edit_chunk_emb.text().strip()
+        doc_id = (self._state.get("doc_id") or "").strip()
+        if not doc_id and chunk_path:
+            stem = Path(chunk_path).stem
+            if stem.endswith("_chunks"):
+                doc_id = stem[: -len("_chunks")]
+            else:
+                chunks = load_jsonl(chunk_path)
+                if chunks and isinstance(chunks[0], dict):
+                    doc_id = chunks[0].get("doc_id") or ""
+                if not doc_id:
+                    doc_id = stem
+        pdf_path = None
+        if self._state.get("pdf_paths"):
+            p = Path(self._state["pdf_paths"][0])
+            if p.is_file():
+                pdf_path = p
+        if not pdf_path and doc_id:
+            for folder in [_project_root() / "data", Path(idx_path).parent.parent]:
+                pdf_path = _find_pdf_for_doc_id(folder, doc_id)
+                if pdf_path:
+                    break
+        if pdf_path and doc_id:
+            _try_export_pdf_images(pdf_path, doc_id, self._label_embedding)
 
     def _on_emb_error(self, msg: str) -> None:
         self._btn_embedding.setEnabled(True)
