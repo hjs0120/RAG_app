@@ -42,7 +42,7 @@
 
 | Phase | 내용 | 완료 |
 |-------|------|:----:|
-| 1 | BaseStructureMapper 인터페이스 정의 (base_mapper.py) | [ ] |
+| 1 | BaseStructureMapper 인터페이스 정의 (base_mapper.py) | [x] |
 | 2 | rules.py 민법 조문 패턴 + line_rebuild 유연화 | [ ] |
 | 3 | MarineStructureMapper 클래스화 (기존 rule_marine_regulation 리팩토링) | [ ] |
 | 4 | StatuteStructureMapper 신규 + mapper_factory | [ ] |
@@ -98,13 +98,13 @@
 
 ### 진도 체크
 
-- [ ] `src/core/base_mapper.py` 생성
-- [ ] `BaseStructureMapper` 추상 클래스 및 `map_to_canonical` 인터페이스 정의
-- [ ] 추상 메서드 `_extract_article_no` 선언
-- [ ] `check_compatibility(raw_blocks, max_pages=5) -> tuple[bool, int]` 메서드 정의
-- [ ] 공통 structure 스택 로직 기본 구현 (자식에서 오버라이드 가능하도록)
-- [ ] 기존 파이프라인 동작 유지
-- [ ] 수동 검증 완료
+- [x] `src/core/base_mapper.py` 생성
+- [x] `BaseStructureMapper` 추상 클래스 및 `map_to_canonical` 인터페이스 정의
+- [x] 추상 메서드 `_extract_article_no` 선언
+- [x] `check_compatibility(raw_blocks, max_pages=5) -> tuple[bool, int]` 메서드 정의
+- [x] 공통 structure 스택 로직 기본 구현 (자식에서 오버라이드 가능하도록)
+- [x] 기존 파이프라인 동작 유지
+- [x] 수동 검증 완료
 
 ### Phase 1 완료 시 커밋
 
