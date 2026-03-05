@@ -45,7 +45,7 @@
 | 1 | BaseStructureMapper 인터페이스 정의 (base_mapper.py) | [x] |
 | 2 | rules.py 민법 조문 패턴 + line_rebuild 유연화 | [x] |
 | 3 | MarineStructureMapper 클래스화 (기존 rule_marine_regulation 리팩토링) | [x] |
-| 4 | StatuteStructureMapper 신규 + mapper_factory | [ ] |
+| 4 | StatuteStructureMapper 신규 + mapper_factory | [x] |
 | 5 | DB 생성 탭 doc_type 선택 UI, Mapper 연동, 매퍼 호환성 검사 안전장치 | [ ] |
 | 6 | V5 통합 검증 및 문서화 | [ ] |
 
@@ -284,12 +284,12 @@ refactor(core): Phase 3 — MarineStructureMapper 클래스화
 
 ### 진도 체크
 
-- [ ] `StatuteStructureMapper` 클래스 구현
-- [ ] `_extract_article_no`: 제 N조 형식 인식
-- [ ] `mapper_factory.get_mapper(doc_type)` 구현
-- [ ] `doc_type` marine/statute 매핑
-- [ ] 민법 Canonical 변환 결과 검증
-- [ ] 수동 검증 완료
+- [x] `StatuteStructureMapper` 클래스 구현
+- [x] `_extract_article_no`: 제 N조 형식 인식
+- [x] `mapper_factory.get_mapper(doc_type)` 구현
+- [x] `doc_type` marine/statute 매핑
+- [x] 민법 Canonical 변환 결과 검증
+- [x] 수동 검증 완료
 
 ### Phase 4 완료 시 커밋
 
