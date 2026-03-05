@@ -49,6 +49,11 @@ def _article_pattern() -> Pattern:
     return re.compile(r"^(\d{2,})\.\s*(?!의|를|을|에)(.*)$")
 
 
+# 상수화: 문서 타입별 조문 패턴
+RE_ARTICLE_MARINE = re.compile(r"^(\d{2,})\.\s*(?!의|를|을|에)(.*)$")
+RE_ARTICLE_STATUTE = re.compile(r"^제\s*(\d+)\s*조\s*(.*)$")
+
+
 def _paragraph_item_pattern() -> Pattern:
     """항: 1. 2. (숫자 한 자리 + 점 + 공백)."""
     return re.compile(r"^([1-9])\.\s+(.*)$")
@@ -121,6 +126,22 @@ def match_article(line: str) -> RuleMatch | None:
     )
 
 
+def match_article_statute(line: str) -> RuleMatch | None:
+    """라인이 법령 조문(제 N조) 패턴이면 RuleMatch 반환.
+    민법 등 일반 법령: 제 1조, 제 274조 등."""
+    m = RE_ARTICLE_STATUTE.match(line.strip())
+    if not m:
+        return None
+    num, rest = m.group(1), m.group(2)
+    section_name = rest.strip() if rest else None
+    return RuleMatch(
+        kind="article",
+        value=num,
+        full_text=line.strip(),
+        article_section=section_name or None,
+    )
+
+
 def match_paragraph(line: str) -> RuleMatch | None:
     """라인이 항/호/목(paragraph) 패턴이면 RuleMatch 반환."""
     s = line.strip()
@@ -136,10 +157,15 @@ def match_paragraph(line: str) -> RuleMatch | None:
     return None
 
 
-def classify_line(line: str) -> RuleMatch | None:
+def classify_line(line: str, doc_type: str = "marine") -> RuleMatch | None:
     """
     라인을 순서대로 검사해 part → chapter → section → article → paragraph 중
     첫 번째로 매칭되는 규칙을 반환. 매칭 없으면 None.
+
+    Args:
+        line: 검사할 텍스트
+        doc_type: "marine" | "regulation" → match_article (101. 형식)
+                  "statute" | "law" → match_article_statute (제 N조 형식)
     """
     r = match_part(line)
     if r:
@@ -150,10 +176,19 @@ def classify_line(line: str) -> RuleMatch | None:
     r = match_section(line)
     if r:
         return r
-    r = match_article(line)
+    # 조(article): doc_type에 따라 패턴 선택
+    if doc_type in ("statute", "law"):
+        r = match_article_statute(line)
+    else:
+        r = match_article(line)
     if r:
         return r
     r = match_paragraph(line)
     if r:
         return r
     return None
+
+
+def classify_line_for_statute(line: str) -> RuleMatch | None:
+    """법령용 분류 (제 N조 형식). Mapper에서 선택 호출용."""
+    return classify_line(line, doc_type="statute")

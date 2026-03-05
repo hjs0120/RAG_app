@@ -43,7 +43,7 @@
 | Phase | 내용 | 완료 |
 |-------|------|:----:|
 | 1 | BaseStructureMapper 인터페이스 정의 (base_mapper.py) | [x] |
-| 2 | rules.py 민법 조문 패턴 + line_rebuild 유연화 | [ ] |
+| 2 | rules.py 민법 조문 패턴 + line_rebuild 유연화 | [x] |
 | 3 | MarineStructureMapper 클래스화 (기존 rule_marine_regulation 리팩토링) | [ ] |
 | 4 | StatuteStructureMapper 신규 + mapper_factory | [ ] |
 | 5 | DB 생성 탭 doc_type 선택 UI, Mapper 연동, 매퍼 호환성 검사 안전장치 | [ ] |
@@ -163,12 +163,12 @@ feat(core): Phase 1 — BaseStructureMapper 인터페이스 정의
 
 ### 진도 체크
 
-- [ ] `rules.py`: `match_article_statute` 함수 추가
-- [ ] `rules.py`: doc_type 또는 별도 classify 함수로 statute 조문 인식
-- [ ] `line_rebuild.py`: `_RE_NEW_SECTION`에 "제 N조" 패턴 추가
-- [ ] 민법 PDF Raw 추출 시 조문 경계 정상 분리
-- [ ] 해양규칙 PDF Raw 추출 회귀 없음
-- [ ] 수동 검증 완료
+- [x] `rules.py`: `match_article_statute` 함수 추가
+- [x] `rules.py`: doc_type 또는 별도 classify 함수로 statute 조문 인식
+- [x] `line_rebuild.py`: `_RE_NEW_SECTION`에 "제 N조" 패턴 추가
+- [x] 민법 PDF Raw 추출 시 조문 경계 정상 분리
+- [x] 해양규칙 PDF Raw 추출 회귀 없음
+- [x] 수동 검증 완료
 
 ### Phase 2 완료 시 커밋
 
