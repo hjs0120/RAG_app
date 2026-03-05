@@ -44,7 +44,7 @@
 |-------|------|:----:|
 | 1 | BaseStructureMapper 인터페이스 정의 (base_mapper.py) | [x] |
 | 2 | rules.py 민법 조문 패턴 + line_rebuild 유연화 | [x] |
-| 3 | MarineStructureMapper 클래스화 (기존 rule_marine_regulation 리팩토링) | [ ] |
+| 3 | MarineStructureMapper 클래스화 (기존 rule_marine_regulation 리팩토링) | [x] |
 | 4 | StatuteStructureMapper 신규 + mapper_factory | [ ] |
 | 5 | DB 생성 탭 doc_type 선택 UI, Mapper 연동, 매퍼 호환성 검사 안전장치 | [ ] |
 | 6 | V5 통합 검증 및 문서화 | [ ] |
@@ -221,11 +221,11 @@ feat(core): Phase 2 — rules.py 민법 조문 패턴 + line_rebuild 유연화
 
 ### 진도 체크
 
-- [ ] `MarineStructureMapper` 클래스 구현
-- [ ] `_extract_article_no`: 101., 202. 형식 인식
-- [ ] `map_to_canonical` 결과 기존과 동일
-- [ ] `rule_marine_regulation.map_to_canonical` 하위 호환 유지
-- [ ] 수동 검증 완료
+- [x] `MarineStructureMapper` 클래스 구현
+- [x] `_extract_article_no`: 101., 202. 형식 인식
+- [x] `map_to_canonical` 결과 기존과 동일
+- [x] `rule_marine_regulation.map_to_canonical` 하위 호환 유지
+- [x] 수동 검증 완료
 
 ### Phase 3 완료 시 커밋
 
