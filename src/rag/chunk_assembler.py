@@ -5,11 +5,9 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Any
 
-# Phase 17 정책
+# Phase 7: 개수 제한 제거 — 필터링 통과한 모든 청크 수용 (max_context_chars만 유지)
 FAISS_TOP_K = 10  # 넉넉히 검색
-MAX_GROUPS = 2  # 상위 그룹 1~2개
-CHUNKS_PER_GROUP = 4  # 그룹당 chunk 3~6개
-MAX_CONTEXT_CHARS = 3200  # 2500~3500 tokens ≈ ~3200자
+MAX_CONTEXT_CHARS = 3200  # 2500~3500 tokens ≈ ~3200자 (LLM 컨텍스트 윈도우)
 
 
 def _group_key(meta: dict[str, Any]) -> str:
@@ -49,17 +47,14 @@ def _group_key(meta: dict[str, Any]) -> str:
 def assemble_chunks(
     results: list[tuple[int, float, dict[str, Any]]],
     *,
-    top_groups: int = MAX_GROUPS,
-    chunks_per_group: int = CHUNKS_PER_GROUP,
     max_context_chars: int = MAX_CONTEXT_CHARS,
 ) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
     """
     FAISS 검색 결과를 조문/섹션 단위로 그룹핑하여 재조합.
+    Phase 7: 개수 제한 제거 — 필터 통과한 모든 그룹/청크 수용 (max_context_chars까지).
 
     Args:
-        results: [(idx, score, meta), ...] — faiss search 결과
-        top_groups: 선택할 상위 그룹 수 (1~2)
-        chunks_per_group: 그룹당 최대 chunk 수 (3~6)
+        results: [(idx, score, meta), ...] — faiss search 결과 (score_threshold 필터링 이후)
         max_context_chars: 최종 컨텍스트 문자 수 제한
 
     Returns:
@@ -78,20 +73,18 @@ def assemble_chunks(
     for key, items in groups.items():
         group_scores[key] = sum(s for _, s, _ in items)
 
-    # 점수 높은 순 정렬
+    # 점수 높은 순 정렬 — 모든 그룹 사용 (개수 제한 없음)
     sorted_keys = sorted(group_scores.keys(), key=lambda k: group_scores[k], reverse=True)
-    selected_keys = sorted_keys[:top_groups]
+    selected_keys = sorted_keys
 
-    # 선택된 그룹에서 chunk 수집 (점수 순)
+    # 모든 그룹에서 chunk 수집 (점수 순, 개수 제한 없음)
     selected: list[tuple[int, float, dict]] = []
     for key in selected_keys:
         items = sorted(groups[key], key=lambda x: x[1], reverse=True)
-        selected.extend(items[:chunks_per_group])
+        selected.extend(items)
 
-    # 전체 점수 순으로 정렬 후 chunks_per_group * top_groups 제한
+    # 전체 점수 순으로 정렬
     selected = sorted(selected, key=lambda x: x[1], reverse=True)
-    limit = min(len(selected), top_groups * chunks_per_group)
-    selected = selected[:limit]
 
     # 컨텍스트 조립 (원문 순서 유지를 위해 doc_id, page, chunk_index 등으로 정렬)
     def sort_key(item: tuple[int, float, dict]) -> tuple:

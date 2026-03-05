@@ -48,14 +48,14 @@ def _format_location(meta: dict[str, Any]) -> str:
     return ", ".join(parts)
 
 
-def _format_source(i: int, meta: dict[str, Any]) -> str:
-    """chunk meta 기반 출처 문자열. Canonical: structure_path, V2: article/section/paragraph."""
+def _format_source(meta: dict[str, Any]) -> str:
+    """chunk meta 기반 출처 문자열. 순번 없이 위치·조문 명칭만 전달."""
     doc_id = meta.get("doc_id") or ""
     citation = format_citation_from_meta(meta)
-    # 출력 예: "[1] MOUS_RULE_2024, p.7, 제 1 장 총칙 > 제 101조"
+    # 출력 예: "민법(법률)(제20432호)(20260101), p.7, 제 1 장 총칙 > 제 101조"
     if citation:
-        return f"[{i}] {doc_id}, {citation}"
-    return f"[{i}] {doc_id}"
+        return f"{doc_id}, {citation}" if doc_id else citation
+    return doc_id or ""
 
 
 @dataclass
@@ -104,7 +104,7 @@ class RAGPipeline:
         q_emb = encode_query(question)
         results = search(self.index, q_emb, self.meta_list, top_k=top_k)
 
-        # 2. 근거 부족 시 거절 (검색 결과가 없을 때만 fallback, 점수 낮아도 결과 있으면 LLM에 맡김)
+        # 2. 근거 부족 시 거절
         if not results:
             return RAGResult(
                 question=question,
@@ -116,10 +116,9 @@ class RAGPipeline:
                 debug_info={"reason": "no_results"},
             )
 
-        # 검색 결과가 있으면 점수가 낮아도 LLM에 맡김 (threshold로 short-circuit 안 함)
-        # 3. Chunk 재조합
-        assembled, selected_chunks, debug_info = assemble_chunks(results)
-        if not assembled.strip():
+        # 3. 점수 기반 필터링 (score >= score_threshold)
+        filtered = [(idx, score, meta) for idx, score, meta in results if score >= score_threshold]
+        if not filtered:
             return RAGResult(
                 question=question,
                 retrieved_chunks=results,
@@ -127,14 +126,24 @@ class RAGPipeline:
                 answer=NO_GROUNDS_MSG,
                 sources=[],
                 sources_meta=[],
+                debug_info={"reason": "below_threshold", "threshold": score_threshold, "raw_count": len(results)},
+            )
+
+        # 4. Chunk 재조합 (필터 통과한 결과만)
+        assembled, selected_chunks, debug_info = assemble_chunks(filtered)
+        if not assembled.strip():
+            return RAGResult(
+                question=question,
+                retrieved_chunks=filtered,
+                assembled_context="",
+                answer=NO_GROUNDS_MSG,
+                sources=[],
+                sources_meta=[],
                 debug_info={**debug_info, "reason": "empty_assembled"},
             )
 
-        # 4. 출처 목록 생성
-        sources = [
-            _format_source(i + 1, sc["meta"])
-            for i, sc in enumerate(selected_chunks)
-        ]
+        # 4. 출처 목록 생성 (순번 없이 위치·조문 명칭만)
+        sources = [_format_source(sc["meta"]) for sc in selected_chunks]
         sources_meta = [sc["meta"] for sc in selected_chunks]
 
         # 5. Ollama 답변 생성 (instruct 모델용 /api/chat 사용)
@@ -151,7 +160,7 @@ class RAGPipeline:
 
         return RAGResult(
             question=question,
-            retrieved_chunks=results,
+            retrieved_chunks=filtered,
             assembled_context=assembled,
             answer=answer,
             sources=sources,

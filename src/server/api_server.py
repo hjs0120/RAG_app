@@ -21,7 +21,7 @@ if str(PROJECT_ROOT) not in __import__("sys").path:
 
 from src.db.db_manager import load_index
 from src.rag.rag_pipeline import RAGPipeline
-from src.rag.rag_config import FAISS_TOP_K, DEFAULT_OLLAMA_MODEL
+from src.rag.rag_config import FAISS_TOP_K, SCORE_THRESHOLD, DEFAULT_OLLAMA_MODEL
 from src.core.embedding_bge import preload_model
 from src.core.pdf_to_images import _safe_doc_id_dir
 from src.llm.ollama_client import OllamaClient
@@ -106,7 +106,8 @@ class AskRequest(BaseModel):
     """POST /api/ask Request body."""
 
     query: str
-    top_k: int = 5
+    top_k: int | None = None  # 검색 Chunk 수 (기본 FAISS_TOP_K)
+    score_threshold: float | None = None  # 유사도 임계값 0.0~1.0 (기본 SCORE_THRESHOLD)
 
 
 class SourceItem(BaseModel):
@@ -165,7 +166,8 @@ def _process_one_ask(body: AskRequest) -> AskResponse:
     try:
         pipeline = _get_pipeline()
         top_k = max(1, min(20, body.top_k or FAISS_TOP_K))
-        result = pipeline.run_query(body.query, top_k=top_k)
+        score_threshold = max(0.0, min(1.0, body.score_threshold if body.score_threshold is not None else SCORE_THRESHOLD))
+        result = pipeline.run_query(body.query, top_k=top_k, score_threshold=score_threshold)
         sources = [_meta_to_source_item(m) for m in result.sources_meta]
         return AskResponse(status="success", answer=result.answer, sources=sources)
     except RuntimeError as e:
@@ -227,7 +229,8 @@ def api_ask(body: AskRequest) -> AskResponse:
     """
     RAG 질의응답.
     - query: 질문
-    - top_k: 검색 Chunk 수 (기본 5)
+    - top_k: 검색 Chunk 수 (기본 10)
+    - score_threshold: 유사도 임계값 0.0~1.0 (이하면 제외, 기본 0.3)
     Phase 3-2: 동시 요청 제한. 큐 가득 시 status="rejected" 반환.
     """
     with _queue_lock:

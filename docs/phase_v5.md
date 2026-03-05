@@ -48,8 +48,10 @@
 | 4 | StatuteStructureMapper 신규 + mapper_factory | [x] |
 | 5 | DB 생성 탭 doc_type 선택 UI, Mapper 연동, 매퍼 호환성 검사 안전장치 | [x] |
 | — | **구조 재구성 지시** (Phase 5와 7 사이) | — |
-| 6 | 구조 재구성 — 매퍼 적용 시점을 PDF→Raw로 전진 | [ ] |
-| 7 | V5 통합 검증 및 문서화 | [ ] |
+| 6 | 구조 재구성 — 매퍼 적용 시점을 PDF→Raw로 전진 | [x] |
+| 7 | 서버용 RAG 로직 고도화 — 점수 기반 동적 필터링 도입 | [ ] |
+| 8 | 글자 수 기반 청크 분할 폐기 및 의미 단위(조 기준) 재구성 | [ ] |
+| 9 | V5 통합 검증 및 문서화 | [ ] |
 
 각 Phase의 **진도 체크** 항목을 검증 후 `[ ]` → `[x]`로 바꾸고, 위 표의 완료도 필요 시 갱신한다.
 
@@ -470,7 +472,163 @@ refactor(core): Phase 6 — 매퍼 적용 시점을 PDF→Raw로 전진
 
 ---
 
-## Phase 7: V5 통합 검증 및 문서화
+## Phase 7: 서버용 RAG 로직 고도화 — 점수 기반 동적 필터링 도입
+
+### 목표
+
+유사도 점수 기반 필터링을 도입하여 저품질 청크를 제거하고, 사용자가 임계값을 조절할 수 있도록 한다. ChunkAssembler의 하드코딩된 개수 제한을 제거한다.
+
+### 작업 내용
+
+1. **필터링 로직 추가 (rag_pipeline.py)**
+
+   - `search_results`를 받은 후, 유사도 점수(score)가 사용자 정의 `score_threshold`보다 낮은 청크는 제거
+   - 필터링을 거친 결과만 ChunkAssembler로 넘겨서 최종 컨텍스트 구성
+
+2. **파라미터 확장 (api_server.py)**
+
+   - `POST /api/ask` 요청 시 `top_k`와 `score_threshold`를 매개변수로 받을 수 있도록 API 스펙 업데이트
+
+3. **UI 연동 (tab_usage.py)**
+
+   - 사용 탭에 `score_threshold`를 조절할 수 있는 슬라이더(0.0 ~ 1.0) 추가
+   - 이 값이 파이프라인에 즉시 반영되도록 연결
+
+4. **기존 제한 해제 (chunk_assembler.py)**
+
+   - ChunkAssembler 내부에 하드코딩된 개수 제한(예: 상위 2개만 선택) 제거
+   - 필터링을 통과한 모든 청크를 수용하도록 변경
+
+### Phase 7에서 다루는 소스
+
+| 파일 | 내용 |
+|------|------|
+| `src/rag/rag_pipeline.py` | score_threshold 필터링 로직 |
+| `src/rag/chunk_assembler.py` | MAX_GROUPS 등 하드코딩 제한 제거 |
+| `src/server/api_server.py` | top_k, score_threshold API 파라미터 |
+| `src/ui/tabs/tab_usage.py` | score_threshold 슬라이더 UI |
+
+### 수동 검증 방법
+
+1. score_threshold 0.5 설정 → 저점수 청크가 제외되는지 확인
+2. score_threshold 0.0 설정 → 모든 검색 결과가 컨텍스트에 포함되는지 확인
+3. API POST /api/ask에 score_threshold 전달 → 응답 품질 변화 확인
+4. ChunkAssembler 제한 제거 후 상위 2개 초과 그룹도 컨텍스트에 포함되는지 확인
+
+### 진도 체크
+
+- [x] rag_pipeline: score_threshold 필터링 로직
+- [x] chunk_assembler: 하드코딩 개수 제한 제거
+- [x] api_server: top_k, score_threshold 파라미터 확장
+- [x] tab_usage: score_threshold 슬라이더 UI
+- [ ] 수동 검증 완료
+
+### Phase 7 완료 시 커밋
+
+```
+feat(rag): Phase 7 — 점수 기반 동적 필터링 도입
+
+- rag_pipeline: score_threshold 필터링
+- chunk_assembler: 개수 제한 제거
+- api_server: top_k, score_threshold 파라미터
+- tab_usage: score_threshold 슬라이더
+```
+
+---
+
+## Phase 8: 글자 수 기반 청크 분할 폐기 및 의미 단위 재구성
+
+### 목표
+
+글자 수(max_length) 기반 청크 분할을 폐기하고, Canonical 구조(장/절/조/항)를 기반으로 의미 단위 청킹을 적용한다.
+
+### 작업 내용
+
+1. **기존 로직 수정 (chunk_builder.py)**
+
+   - `max_length`에 도달하면 무조건 자르는 로직을 폐기한다.
+   - `split_into_chunks`의 하드 컷(문자수 기준 분할)을 제거한다.
+
+2. **Canonical 데이터 활용**
+
+   - 매퍼를 통해 생성된 Canonical JSON의 structure(장/절/조/항) 정보를 기반으로 분할 로직을 재작성한다.
+   - **원칙**: 하나의 '조(Article)'가 하나의 청크가 되도록 한다.
+   - 조 단위로 Canonical 레코드를 그룹핑한 뒤, 조 전체 텍스트를 하나의 청크로 생성한다.
+
+3. **예외 처리**
+
+   - 하나의 '조'가 너무 길어 분할이 필요한 경우:
+     - **항(Paragraph) 단위 우선**: `①`, `②`, `③` 같은 항 번호를 먼저 찾아 분할한다. 법령에서 '항'은 그 자체로 완결된 의미 단위를 가지는 경우가 많아 마침표보다 안전한 분할 지점이다.
+     - 항 번호를 찾을 수 없을 때만 **문장의 끝(마침표)** 기준으로 자른다.
+     - 잘린 청크의 서두에 조문 번호(예: 제10조)를 다시 명시한다.
+
+3-1. **청크 상단 '헤더' 자동 삽입 (추천)**
+
+   - **작업 내용**: 분할된 청크뿐만 아니라 **모든 청크**의 서두에 `[제N조 제목]`을 텍스트로 강제 삽입한다.
+   - **이유**: LLM이 수천 자의 컨텍스트를 읽을 때, 현재 읽고 있는 문단이 정확히 어떤 조문에 속하는지 매번 상기시켜 주면 인용 정확도가 비약적으로 상승한다.
+
+4. **검증**
+
+   - `_chunks.jsonl` 결과에서 문장이 중간에 끊기거나 다른 조문과 뒤섞이는 현상이 사라졌는지 확인한다.
+   - 예: "청구에", "의하여"처럼 문장 중간에서 끊기지 않아야 함.
+   - 예: 제10조 내용과 제11조 내용이 같은 청크에 섞이면 안 됨.
+
+5. **UI 반영 (tab_db_create.py)**
+
+   - 현재 5. Chunk 생성 그룹에 "목표:" (target_len), "최대:" (max_len) 스핀박스가 있다.
+   - 조 단위 청킹 전환 후:
+     - **목표** 스핀박스 제거 또는 비활성화 (문자 수 권장 길이는 더 이상 사용하지 않음)
+     - **최대** 스핀박스: 라벨을 **"조문 분할 임계치(자)"**로 변경
+       - **로직**: 조문 길이가 이 값보다 작으면 → 하나의 청크로 생성. 이 값을 초과하면 → 내부적으로 '항' 또는 '마침표' 단위로 분할 실행.
+
+### Phase 8에서 다루는 소스
+
+| 파일 | 내용 |
+|------|------|
+| `src/core/chunk_builder.py` | 글자 수 하드 컷 폐기, 조 단위 청킹, 항(①②③) 우선→마침표 분할, 모든 청크 서두 [제N조 제목] 헤더 삽입 |
+| `src/ui/tabs/tab_db_create.py` | Chunk 생성 그룹 — 목표 제거, "조문 분할 임계치(자)" 라벨 적용 |
+
+### 수동 검증 방법
+
+1. 민법 Canonical → Chunk 생성 후 `_chunks.jsonl` 열기
+2. 조문이 중간에 끊기지 않았는지 샘플 확인 (예: 제10조, 제13조 등 긴 조문)
+3. 다른 조문 내용이 한 청크에 섞여 있지 않은지 확인
+4. 조가 분할된 경우, 청크 서두에 "제 N조"가 명시되어 있는지 확인
+5. 해양규칙 문서(101. 형식) Chunk 생성 회귀 없음 확인
+
+### Phase 8 작업 완료 시 최종 체크리스트
+
+작업을 완료했다고 판단하기 전, 아래 항목을 반드시 확인한다.
+
+| 항목 | 확인 내용 |
+|------|-----------|
+| **데이터 무결성** | 조문의 마지막 글자가 "한다.", "본다." 등으로 깔끔하게 끝나는가? |
+| **구조 전이 방지** | 제10조 내용 끝에 제11조의 "제11조(제목)" 텍스트가 섞여 들어가지 않았는가? |
+| **메타데이터 동기화** | 분할된 청크들도 원본 `doc_id`, `page`, `structure_path` 정보를 그대로 유지하고 있는가? |
+
+### 진도 체크
+
+- [ ] chunk_builder: max_length 무조건 자르기 로직 폐기
+- [ ] chunk_builder: 조 단위 = 1청크 분할 로직 재작성
+- [ ] chunk_builder: 예외(긴 조) 시 항(①②③) 우선 → 마침표 순으로 분할, 조문 번호 재명시
+- [ ] chunk_builder: 모든 청크 서두에 [제N조 제목] 헤더 자동 삽입
+- [ ] tab_db_create: 목표 제거, "최대" → "조문 분할 임계치(자)"로 라벨 변경
+- [ ] _chunks.jsonl: 문장 중간 끊김/조문 뒤섞임 현상 제거 확인
+- [ ] 최종 체크리스트: 데이터 무결성(한다./본다. 종결), 구조 전이 방지, 메타데이터 동기화
+- [ ] 해양규칙 파이프라인 회귀 없음
+
+### Phase 8 완료 시 커밋
+
+```
+refactor(core): Phase 8 — 조 단위 청킹, 글자 수 하드 컷 폐기
+
+- chunk_builder: Canonical structure 기반 조=1청크, 항 우선 분할, 청크 헤더 [제N조 제목] 삽입
+- tab_db_create: 목표 제거, 조문 분할 임계치(자) 라벨
+```
+
+---
+
+## Phase 9: V5 통합 검증 및 문서화
 
 ### 목표
 
@@ -513,7 +671,7 @@ V5 완료 기준(goal_v5.md)을 충족하는지 검증하고, 문서를 정리�
    └── line_rebuild.py      (V5 수정)
    ```
 
-### Phase 7에서 다루는 소스
+### Phase 9에서 다루는 소스
 
 | 파일 | 내용 |
 |------|------|
@@ -539,10 +697,10 @@ V5 완료 기준(goal_v5.md)을 충족하는지 검증하고, 문서를 정리�
 - [ ] `phase_v5.md` 진도 반영
 - [ ] 수동 검증 완료
 
-### Phase 7 완료 시 커밋
+### Phase 9 완료 시 커밋
 
 ```
-docs: Phase 7 — V5 통합 검증 및 문서화
+docs: Phase 9 — V5 통합 검증 및 문서화
 
 - readme.md: V5 멀티 문서 지원
 - phase_v5.md: 진도 반영
@@ -560,6 +718,8 @@ docs: Phase 7 — V5 통합 검증 및 문서화
 | 4 | `src/core/statute_mapper.py`, `mapper_factory.py` | goal_v5.md §2-2-2, §2-3 |
 | 5 | `src/ui/tabs/tab_db_create.py`, `mapper_factory.py`, `base_mapper.py` | goal_v5.md §2-5, §2-6 |
 | 6 | `extract_pdf_raw.py`, `line_rebuild.py`, `base_mapper.py`, `tab_db_create.py` | goal_v5.md §2-8 |
-| 7 | `readme.md`, `phase_v5.md`, `project_overview.md` | goal_v5.md §3, §4 |
+| 7 | `src/rag/rag_pipeline.py`, `chunk_assembler.py`, `api_server.py`, `tab_usage.py` | phase_v5.md Phase 7 |
+| 8 | `src/core/chunk_builder.py`, `src/ui/tabs/tab_db_create.py` | phase_v5.md Phase 8 |
+| 9 | `readme.md`, `phase_v5.md`, `project_overview.md` | goal_v5.md §3, §4 |
 
 매 Phase는 위 표에 해당하는 파일만 열어 작업하면 토큰 사용을 최소화할 수 있다.

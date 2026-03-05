@@ -49,8 +49,7 @@ from src.core.export_jsonl import (
 from src.core.chunk_builder import (
     build_chunks,
     write_chunk_jsonl,
-    TARGET_LEN,
-    MAX_LEN,
+    DEFAULT_SPLIT_THRESHOLD,
     MIN_CHUNK_LEN,
 )
 from src.core.faiss_index import build_index_from_chunks
@@ -733,18 +732,15 @@ class TabDBCreate(QWidget):
         row_chunk.addWidget(self._btn_browse_chunk)
         chunk_layout.addLayout(row_chunk)
         row_opts_chunk = QHBoxLayout()
-        row_opts_chunk.addWidget(QLabel("목표:"))
-        self._spin_target = QSpinBox()
-        self._spin_target.setRange(100, 2000)
-        self._spin_target.setValue(TARGET_LEN)
-        self._spin_target.setSuffix("자")
-        row_opts_chunk.addWidget(self._spin_target)
-        row_opts_chunk.addWidget(QLabel("최대:"))
-        self._spin_max = QSpinBox()
-        self._spin_max.setRange(200, 3000)
-        self._spin_max.setValue(MAX_LEN)
-        self._spin_max.setSuffix("자")
-        row_opts_chunk.addWidget(self._spin_max)
+        row_opts_chunk.addWidget(QLabel("조문 분할 임계치(자):"))
+        self._spin_split_threshold = QSpinBox()
+        self._spin_split_threshold.setRange(200, 3000)
+        self._spin_split_threshold.setValue(DEFAULT_SPLIT_THRESHOLD)
+        self._spin_split_threshold.setSuffix("자")
+        self._spin_split_threshold.setToolTip(
+            "조문 길이가 이 값보다 작으면 1청크. 초과 시 항(①②③) 또는 마침표 단위로 분할."
+        )
+        row_opts_chunk.addWidget(self._spin_split_threshold)
         row_opts_chunk.addStretch()
         chunk_layout.addLayout(row_opts_chunk)
         row_btn_chunk = QHBoxLayout()
@@ -1140,15 +1136,11 @@ class TabDBCreate(QWidget):
         if not records:
             self._label_chunk.setText("JSONL에서 레코드를 읽지 못했습니다.")
             return
-        target_len = self._spin_target.value()
-        max_len = self._spin_max.value()
-        if max_len < target_len:
-            max_len = target_len
+        split_threshold = self._spin_split_threshold.value()
         try:
             chunks = build_chunks(
                 records,
-                target_len=target_len,
-                max_len=max_len,
+                split_threshold=split_threshold,
                 min_chunk_len=MIN_CHUNK_LEN,
             )
         except Exception as e:

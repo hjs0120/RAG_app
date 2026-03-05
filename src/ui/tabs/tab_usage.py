@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QSpinBox,
+    QSlider,
     QLineEdit,
     QFileDialog,
     QScrollArea,
@@ -38,7 +39,8 @@ from src.core.faiss_index import (
 )
 from src.llm.ollama_client import OllamaClient
 from src.rag.rag_pipeline import RAGPipeline, RAGResult
-from src.rag.rag_config import FAISS_TOP_K, DEFAULT_OLLAMA_MODEL
+from src.rag.citation_formatter import format_citation_from_meta
+from src.rag.rag_config import FAISS_TOP_K, SCORE_THRESHOLD, DEFAULT_OLLAMA_MODEL
 
 # PDF 뷰어용 (tab_review와 동일한 렌더링)
 from src.ui.tabs.tab_review import _render_page_to_pixmap
@@ -122,7 +124,7 @@ def _format_source_display(i: int, meta: dict) -> str:
 
 
 def _extract_cited_sources(answer: str, max_sources: int) -> list[int]:
-    """답변에서 인용된 출처 번호 추출 (1-based)."""
+    """답변에서 [1],[2] 형태의 인용 번호 추출 (1-based). 현재는 순번 미사용."""
     if max_sources <= 0:
         return []
     found: set[int] = set()
@@ -131,6 +133,36 @@ def _extract_cited_sources(answer: str, max_sources: int) -> list[int]:
         if 1 <= n <= max_sources:
             found.add(n)
     return sorted(found)
+
+
+def _extract_cited_indices_by_match(
+    answer: str, sources: list[str], sources_meta: list[dict]
+) -> list[int]:
+    """
+    [출처] 섹션에 나열된 출처와 매칭하여 인용된 출처의 인덱스(0-based) 반환.
+    순번 [1],[2] 미사용 시, 실제 나열된 출처 문자열로 매칭.
+    """
+    if not sources or not sources_meta or len(sources) != len(sources_meta):
+        return []
+    # [출처] 섹션 추출
+    m = re.search(r"\[출처\]|출처\s*[:：]", answer, re.IGNORECASE)
+    if not m:
+        return []
+    ref_section = answer[m.end() :].strip()
+    if not ref_section:
+        return []
+    ref_normalized = re.sub(r"\s+", " ", ref_section)
+    cited: list[int] = []
+    for i, meta in enumerate(sources_meta):
+        structure_path = ((meta.get("meta") or {}).get("structure_path") or "").strip()
+        if structure_path and structure_path in ref_normalized:
+            cited.append(i)
+            continue
+        # structure_path 없으면 전체 source 문자열로 매칭
+        src = (sources[i] or "").strip()
+        if src and len(src) > 10 and src in ref_normalized:
+            cited.append(i)
+    return cited
 
 
 def _format_search_result(rank: int, idx: int, score: float, meta: dict) -> str:
@@ -254,6 +286,8 @@ class RAGWorker(QObject):
         pipeline: RAGPipeline,
         question: str,
         top_k: int,
+        *,
+        score_threshold: float = SCORE_THRESHOLD,
         model: str = DEFAULT_OLLAMA_MODEL,
         parent: QObject | None = None,
     ) -> None:
@@ -261,12 +295,16 @@ class RAGWorker(QObject):
         self._pipeline = pipeline
         self._question = question
         self._top_k = top_k
+        self._score_threshold = score_threshold
         self._model = model
 
     def run(self) -> None:
         try:
             result = self._pipeline.run_query(
-                self._question, top_k=self._top_k, model=self._model
+                self._question,
+                top_k=self._top_k,
+                score_threshold=self._score_threshold,
+                model=self._model,
             )
             self.finished.emit(result)
         except Exception as e:
@@ -279,19 +317,25 @@ class APIAskWorker(QObject):
     finished = Signal(object)
     error = Signal(str)
 
-    def __init__(self, server_url: str, question: str, top_k: int, parent: QObject | None = None) -> None:
+    def __init__(
+        self,
+        server_url: str,
+        question: str,
+        top_k: int,
+        *,
+        score_threshold: float = SCORE_THRESHOLD,
+        parent: QObject | None = None,
+    ) -> None:
         super().__init__(parent)
         self._server_url = server_url.rstrip("/")
         self._question = question
         self._top_k = top_k
+        self._score_threshold = score_threshold
 
     def run(self) -> None:
         try:
-            r = requests.post(
-                f"{self._server_url}/api/ask",
-                json={"query": self._question, "top_k": self._top_k},
-                timeout=120,
-            )
+            payload = {"query": self._question, "top_k": self._top_k, "score_threshold": self._score_threshold}
+            r = requests.post(f"{self._server_url}/api/ask", json=payload, timeout=120)
             r.raise_for_status()
             data = r.json()
             if data.get("status") == "error":
@@ -325,12 +369,17 @@ class APIAskWorker(QObject):
                 sources_meta.append(m)
                 retrieved_chunks.append((i, 0.0, m))
             ctx = "\n\n".join(s.get("text", "") for s in sources_raw)
+            # 출처: 순번 없이 위치·조문 명칭만 (rag_pipeline과 동일 형식)
+            def _fmt(m: dict) -> str:
+                doc_id = m.get("doc_id") or ""
+                cit = format_citation_from_meta({"meta": m.get("meta"), "doc_id": doc_id, "page": m.get("page")})
+                return f"{doc_id}, {cit}" if cit else doc_id or ""
             result = RAGResult(
                 question=self._question,
                 retrieved_chunks=retrieved_chunks,
                 assembled_context=ctx,
                 answer=answer,
-                sources=[f"[{i+1}] {m.get('chunk_id','')}" for i, m in enumerate(sources_meta)],
+                sources=[_fmt(m) for m in sources_meta],
                 sources_meta=sources_meta,
                 debug_info={"source": "api"},
             )
@@ -363,6 +412,7 @@ class TabUsage(QWidget):
         self._models_list_worker: ModelsListWorker | None = None
         self._models_list_thread: QThread | None = None
         self._models_loaded = False
+        self._model_load_in_progress = False
         self._last_search_results: list = []
         self._last_sources_meta: list = []
         self._current_pdf_pixmap: QPixmap | None = None
@@ -453,6 +503,19 @@ class TabUsage(QWidget):
         self._spin_topk.setRange(1, 30)
         self._spin_topk.setValue(FAISS_TOP_K)
         row_btn.addWidget(self._spin_topk)
+        row_btn.addWidget(QLabel("임계값:"))
+        self._slider_threshold = QSlider(Qt.Orientation.Horizontal)
+        self._slider_threshold.setRange(0, 100)
+        self._slider_threshold.setValue(int(SCORE_THRESHOLD * 100))
+        self._slider_threshold.setToolTip("유사도 점수 임계값 0.0~1.0 (이하면 제외)")
+        row_btn.addWidget(self._slider_threshold)
+        self._label_threshold = QLabel(f"{SCORE_THRESHOLD:.2f}")
+        self._label_threshold.setMinimumWidth(36)
+        self._label_threshold.setStyleSheet("color: #666;")
+        self._slider_threshold.valueChanged.connect(
+            lambda v: self._label_threshold.setText(f"{v / 100:.2f}")
+        )
+        row_btn.addWidget(self._label_threshold)
         self._btn_search = QPushButton("검색")
         self._btn_search.clicked.connect(self._on_search)
         self._btn_search.setEnabled(False)
@@ -584,14 +647,20 @@ class TabUsage(QWidget):
             self._btn_answer.setEnabled(True)
             self._btn_search.setEnabled(False)  # 검색은 로컬 인덱스 필요
         else:
-            if self._models_loaded:
+            if self._model_load_in_progress:
+                # 로드 중일 때는 "로드 중…" 라벨을 덮어쓰지 않음
+                self._btn_answer.setEnabled(False)
+                self._btn_search.setEnabled(False)
+            elif self._models_loaded:
                 self._label_model_status.setText("로드 완료 (bge-m3, Ollama)")
                 self._label_model_status.setStyleSheet("color: #060;")
+                self._btn_answer.setEnabled(True)
+                self._btn_search.setEnabled(True)
             else:
                 self._label_model_status.setText("미로드 (첫 질문 시 로드됨)")
                 self._label_model_status.setStyleSheet("color: #666;")
-            self._btn_answer.setEnabled(self._models_loaded)
-            self._btn_search.setEnabled(self._models_loaded)
+                self._btn_answer.setEnabled(False)
+                self._btn_search.setEnabled(False)
 
     def _on_check_bge(self) -> None:
         """bge-m3 모델 존재 여부 확인."""
@@ -672,6 +741,7 @@ class TabUsage(QWidget):
     def _on_load_models(self) -> None:
         """bge-m3, Ollama 모델 사전 로드 (백그라운드)."""
         self._btn_load_models.setEnabled(False)
+        self._model_load_in_progress = True
         self._label_model_status.setText("로드 중… (bge-m3, Ollama)")
         self._label_model_status.setStyleSheet("color: #f60;")
         model = self._combo_model.currentText().strip() or DEFAULT_OLLAMA_MODEL
@@ -688,6 +758,7 @@ class TabUsage(QWidget):
         self._model_load_thread.wait()
         self._btn_load_models.setEnabled(True)
         self._models_loaded = True
+        self._model_load_in_progress = False
         self._refresh_server_status()
 
     def _on_model_load_error(self, msg: str) -> None:
@@ -695,6 +766,7 @@ class TabUsage(QWidget):
             self._model_load_thread.quit()
             self._model_load_thread.wait()
         self._btn_load_models.setEnabled(True)
+        self._model_load_in_progress = False
         self._label_model_status.setText(f"로드 실패: {msg[:50]}…")
         self._label_model_status.setStyleSheet("color: #c00;")
 
@@ -869,11 +941,12 @@ class TabUsage(QWidget):
         self._edit_context.clear()
         self._label_context_info.setText("문자 수: - | 그룹: -")
         top_k = self._spin_topk.value()
+        score_threshold = self._slider_threshold.value() / 100.0
 
         if self._use_server_mode():
             # 서버 모드: API 호출 (로컬 모델/인덱스 불필요)
             url = self._state["server_url"]
-            self._api_ask_worker = APIAskWorker(url, question, top_k)
+            self._api_ask_worker = APIAskWorker(url, question, top_k, score_threshold=score_threshold)
             self._api_ask_thread = QThread()
             self._api_ask_worker.moveToThread(self._api_ask_thread)
             self._api_ask_thread.started.connect(self._api_ask_worker.run)
@@ -887,7 +960,9 @@ class TabUsage(QWidget):
                 return
             pipeline = RAGPipeline(self._index, self._meta_list)
             model = self._combo_model.currentText().strip() or DEFAULT_OLLAMA_MODEL
-            self._rag_worker = RAGWorker(pipeline, question, top_k, model=model)
+            self._rag_worker = RAGWorker(
+                pipeline, question, top_k, score_threshold=score_threshold, model=model
+            )
             self._rag_thread = QThread()
             self._rag_worker.moveToThread(self._rag_thread)
             self._rag_thread.started.connect(self._rag_worker.run)
@@ -927,13 +1002,20 @@ class TabUsage(QWidget):
         # 답변 영역
         self._edit_answer.setPlainText(result.answer)
 
-        # 출처 드롭다운 — 답변에 인용된 출처만 표시
+        # 출처 드롭다운 — 답변 [출처] 섹션에 나열된 출처만 표시
         all_meta = getattr(result, "sources_meta", [])
-        cited = _extract_cited_sources(result.answer, len(all_meta))
-        if cited:
-            filtered_meta = [all_meta[i - 1] for i in cited]
+        all_sources = getattr(result, "sources", [])
+        cited_indices = _extract_cited_indices_by_match(
+            result.answer, all_sources, all_meta
+        )
+        if cited_indices:
+            filtered_meta = [all_meta[i] for i in cited_indices]
         else:
-            filtered_meta = all_meta
+            # [1],[2] 형식 인용 시 fallback
+            cited = _extract_cited_sources(result.answer, len(all_meta))
+            filtered_meta = (
+                [all_meta[i - 1] for i in cited] if cited else all_meta
+            )
         self._last_sources_meta = filtered_meta
         self._combo_sources.blockSignals(True)
         self._combo_sources.clear()
