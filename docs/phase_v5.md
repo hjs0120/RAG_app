@@ -46,7 +46,7 @@
 | 2 | rules.py 민법 조문 패턴 + line_rebuild 유연화 | [x] |
 | 3 | MarineStructureMapper 클래스화 (기존 rule_marine_regulation 리팩토링) | [x] |
 | 4 | StatuteStructureMapper 신규 + mapper_factory | [x] |
-| 5 | DB 생성 탭 doc_type 선택 UI, Mapper 연동, 매퍼 호환성 검사 안전장치 | [ ] |
+| 5 | DB 생성 탭 doc_type 선택 UI, Mapper 연동, 매퍼 호환성 검사 안전장치 | [x] |
 | 6 | V5 통합 검증 및 문서화 | [ ] |
 
 각 Phase의 **진도 체크** 항목을 검증 후 `[ ]` → `[x]`로 바꾸고, 위 표의 완료도 필요 시 갱신한다.
@@ -367,15 +367,15 @@ DB 생성 탭 1. Import 그룹에 문서 타입 선택 콤보박스를 추가하
 
 ### 진도 체크
 
-- [ ] 1. Import 그룹에 문서 타입 콤보박스 추가
-- [ ] doc_type 상태 저장
-- [ ] 3. Canonical 변환 시 get_mapper(doc_type) 연동
-- [ ] 해양규칙/법령 전환 시 Canonical 결과 변경 확인
-- [ ] 전체 파이프라인(Chunk, 임베딩) 정상 동작
-- [ ] Chunk/임베딩 전 check_compatibility Dry-run 수행
-- [ ] 매퍼 불일치 시 QMessageBox 경고, [중단]/[강제 진행] 동작
-- [ ] 검사 결과 로그 기록 (호환 여부, 패턴 수)
-- [ ] 수동 검증 완료
+- [x] 1. Import 그룹에 문서 타입 콤보박스 추가
+- [x] doc_type 상태 저장
+- [x] 3. Canonical 변환 시 get_mapper(doc_type) 연동
+- [x] 해양규칙/법령 전환 시 Canonical 결과 변경 확인
+- [x] 전체 파이프라인(Chunk, 임베딩) 정상 동작
+- [x] Chunk/임베딩 전 check_compatibility Dry-run 수행
+- [x] 매퍼 불일치 시 QMessageBox 경고, [중단]/[강제 진행] 동작
+- [x] 검사 결과 로그 기록 (호환 여부, 패턴 수)
+- [x] 수동 검증 완료
 
 ### Phase 5 완료 시 커밋
 

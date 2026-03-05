@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from PySide6.QtCore import Qt, QThread, Signal, QObject, QEvent
 from PySide6.QtGui import QImage, QKeySequence, QPixmap, QShortcut
@@ -32,12 +35,13 @@ from PySide6.QtWidgets import (
     QTreeWidget,
     QTreeWidgetItem,
     QTabWidget,
+    QComboBox,
 )
 
 import fitz
 
 from src.core.extract_pdf_raw import extract_raw
-from src.core.rule_marine_regulation import map_to_canonical
+from src.core.mapper_factory import get_mapper
 from src.core.export_jsonl import (
     write_records_jsonl,
     load_jsonl,
@@ -608,6 +612,17 @@ class TabDBCreate(QWidget):
         self._check_after_toc = QCheckBox("차례 이후부터")
         self._check_after_toc.setChecked(self._state.get("after_toc", True))
         imp_layout.addWidget(self._check_after_toc)
+        row_doc_type = QHBoxLayout()
+        row_doc_type.addWidget(QLabel("문서 타입:"))
+        self._combo_doc_type = QComboBox()
+        self._combo_doc_type.addItem("해양규칙 (marine)", "marine")
+        self._combo_doc_type.addItem("법령 (statute)", "statute")
+        self._combo_doc_type.setToolTip("해양규칙: 101. 형식 / 법령: 제 N조 형식")
+        self._combo_doc_type.currentIndexChanged.connect(self._on_doc_type_changed)
+        self._state["doc_type"] = self._combo_doc_type.currentData() or "marine"
+        row_doc_type.addWidget(self._combo_doc_type)
+        row_doc_type.addStretch()
+        imp_layout.addLayout(row_doc_type)
         layout.addWidget(group_import)
 
         # 2. Raw 추출
@@ -916,15 +931,53 @@ class TabDBCreate(QWidget):
         self._progress_extract.setVisible(False)
         self._label_extract.setText(f"오류: {msg}")
 
+    def _on_doc_type_changed(self) -> None:
+        val = self._combo_doc_type.currentData()
+        if val is not None:
+            self._state["doc_type"] = val
+
+    def _run_mapper_compatibility_check(self) -> bool:
+        """
+        매퍼 호환성 검사. raw_blocks가 있으면 check_compatibility 실행.
+        불일치 시 QMessageBox로 [중단]/[강제 진행] 선택.
+        Returns: True=진행, False=중단
+        """
+        raw_blocks = self._state.get("raw_blocks", [])
+        if not raw_blocks:
+            return True
+        doc_type = self._state.get("doc_type", "marine")
+        mapper = get_mapper(doc_type)
+        compatible, count = mapper.check_compatibility(raw_blocks, max_pages=5)
+        if compatible:
+            logger.info("매퍼 호환성 검사: %s, 호환됨, 패턴 %d건 발견", doc_type, count)
+            return True
+        logger.warning("매퍼 호환성 검사: %s, 불일치, 패턴 %d건 발견", doc_type, count)
+        box = QMessageBox(self)
+        box.setWindowTitle("매퍼 불일치")
+        box.setText(
+            "선택한 문서 타입과 실제 문서 형식이 맞지 않을 수 있습니다.\n\n"
+            "해양규칙: 101., 202. 형식\n"
+            "법령: 제 1조, 제 2조 형식\n\n"
+            "강제 진행하시겠습니까?"
+        )
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setStandardButtons(QMessageBox.StandardButton.Cancel | QMessageBox.StandardButton.Ok)
+        box.button(QMessageBox.StandardButton.Ok).setText("강제 진행")
+        box.button(QMessageBox.StandardButton.Cancel).setText("중단")
+        ret = box.exec()
+        return ret == QMessageBox.StandardButton.Ok
+
     def _on_parse(self) -> None:
         raw_blocks = self._state.get("raw_blocks", [])
         if not raw_blocks:
             self._label_parse.setText("Raw 추출을 먼저 실행하세요.")
             return
+        doc_type = self._state.get("doc_type", "marine")
         pdf_paths = self._state.get("pdf_paths", [])
         source_file = Path(pdf_paths[0]).name if pdf_paths else "unknown.pdf"
         source_meta = {"file_name": source_file}
-        canonical = map_to_canonical(raw_blocks, source_meta)
+        mapper = get_mapper(doc_type)
+        canonical = mapper.map_to_canonical(raw_blocks, source_meta, doc_type=doc_type)
         self._state["canonical_records"] = canonical
         self._canonical_records = canonical
         self._label_parse.setText(f"완료: {len(canonical)}개 Canonical 레코드 변환.")
@@ -1024,6 +1077,8 @@ class TabDBCreate(QWidget):
             self._edit_chunk_input.setText(path)
 
     def _on_chunk(self) -> None:
+        if not self._run_mapper_compatibility_check():
+            return
         input_path = self._edit_chunk_input.text().strip()
         if not input_path:
             self._label_chunk.setText("원본 JSONL을 선택하세요.")
@@ -1075,6 +1130,8 @@ class TabDBCreate(QWidget):
             self._edit_emb_output.setText(path)
 
     def _on_embedding(self) -> None:
+        if not self._run_mapper_compatibility_check():
+            return
         chunk_path = self._edit_chunk_emb.text().strip()
         output_dir = self._edit_emb_output.text().strip() or _default_output_dir(self._state)
         if not chunk_path:
