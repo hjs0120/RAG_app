@@ -47,7 +47,9 @@
 | 3 | MarineStructureMapper 클래스화 (기존 rule_marine_regulation 리팩토링) | [x] |
 | 4 | StatuteStructureMapper 신규 + mapper_factory | [x] |
 | 5 | DB 생성 탭 doc_type 선택 UI, Mapper 연동, 매퍼 호환성 검사 안전장치 | [x] |
-| 6 | V5 통합 검증 및 문서화 | [ ] |
+| — | **구조 재구성 지시** (Phase 5와 7 사이) | — |
+| 6 | 구조 재구성 — 매퍼 적용 시점을 PDF→Raw로 전진 | [ ] |
+| 7 | V5 통합 검증 및 문서화 | [ ] |
 
 각 Phase의 **진도 체크** 항목을 검증 후 `[ ]` → `[x]`로 바꾸고, 위 표의 완료도 필요 시 갱신한다.
 
@@ -388,7 +390,87 @@ feat(ui): Phase 5 — DB 생성 탭 doc_type 선택, Mapper 연동, 매퍼 호�
 
 ---
 
-## Phase 6: V5 통합 검증 및 문서화
+## 구조 재구성 지시 — 매퍼 적용 시점 변경
+
+> Phase 5 완료 후, Phase 6(구조 재구성) 수행 전 참고. goal_v5.md §2-8 및 §1.3과 연동.
+
+현재 매퍼가 Raw → Canonical 단계에서만 작동한다. 이를 **PDF → Raw (extract_pdf_raw) 단계로 전진 배치**하여 재구성한다.
+
+### 1. 매퍼 주입 (Dependency Injection)
+
+* **대상**: `extract_pdf_raw.py`
+* **지시**: 함수들이 고정된 `_RE_NEW_SECTION`을 사용하는 대신, MapperFactory로부터 받은 매퍼의 규칙을 인자로 전달받아 사용하도록 수정한다.
+
+### 2. line_rebuild.py 유연화
+
+* **대상**: `line_rebuild.py`
+* **지시**: 섹션을 나누는 기준(`_RE_NEW_SECTION`)을 매퍼가 제공하는 정규식 패턴으로 동적 교체한다.
+* **결과**: 민법은 제 N조를 기준으로, 해양규칙은 101.을 기준으로 정확한 Raw 블록을 생성할 수 있어야 한다.
+
+### 3. Raw → Canonical 단계 단순화
+
+* **지시**: 이미 매퍼의 규칙대로 정확하게 쪼개진 Raw 블록이 생성되었으므로, 변환 단계에서는 복잡한 패턴 매칭 없이 Raw의 정보를 Canonical Schema로 옮기기만 한다.
+
+### 4. 적합성 검사 위치 조정
+
+* **시점**: `check_compatibility`는 **추출 시작 직전**에 수행한다.
+* **지시**: 검사를 통과한 매퍼의 규칙이 `extract_pdf_raw`에 주입되어야 한다.
+* **절차**:
+  1. 5페이지만 선행 추출 (Dry-run)
+  2. `check_compatibility` 실행
+  3. 통과 시 → 매퍼 규칙을 `extract_pdf_raw`에 주입하여 전체 추출
+  4. 실패 시 → 추출 자체를 수행하지 않음
+
+---
+
+## Phase 6: 구조 재구성 — 매퍼 적용 시점을 PDF→Raw로 전진
+
+### 목표
+
+매퍼를 Raw → Canonical에서 PDF → Raw (extract_pdf_raw) 단계로 전진 배치한다.
+
+### 작업 내용
+
+위 **구조 재구성 지시**에 따른 구현. 상세는 goal_v5.md §2-8 참조.
+
+### Phase 6에서 다루는 소스
+
+| 파일 | 내용 |
+|------|------|
+| `src/core/extract_pdf_raw.py` | 매퍼 규칙(섹션 패턴) 주입, max_pages 지원 |
+| `src/core/line_rebuild.py` | 매퍼 제공 정규식으로 동적 교체 |
+| `src/core/base_mapper.py` | get_section_pattern() 등 매퍼 인터페이스 확장 |
+| `src/ui/tabs/tab_db_create.py` | 추출 직전 Dry-run, check_compatibility, 매퍼 주입 |
+
+### 수동 검증 방법
+
+1. 민법 PDF + 해양규칙 선택 → 추출 시 매퍼 불일치 경고, 추출 차단 확인
+2. 해양규칙 PDF + 해양규칙 선택 → 정상 추출 (101. 기준 블록)
+3. 민법 PDF + 법령 선택 → 정상 추출 (제 N조 기준 블록)
+4. Raw → Canonical 변환 결과 정확성 확인
+
+### 진도 체크
+
+- [ ] extract_pdf_raw: 매퍼 규칙 주입, max_pages 파라미터
+- [ ] BaseStructureMapper: get_section_pattern() 추가
+- [ ] line_rebuild: 동적 패턴 사용
+- [ ] tab_db_create: 추출 직전 Dry-run, 검사 통과 시 매퍼 주입
+- [ ] Raw → Canonical 단순화
+- [ ] 수동 검증 완료
+
+### Phase 6 완료 시 커밋
+
+```
+refactor(core): Phase 6 — 매퍼 적용 시점을 PDF→Raw로 전진
+
+- extract_pdf_raw: 매퍼 주입, max_pages
+- line_rebuild: 동적 섹션 패턴
+- check_compatibility: 추출 직전 Dry-run
+```
+
+---
+
+## Phase 7: V5 통합 검증 및 문서화
 
 ### 목표
 
@@ -399,7 +481,7 @@ V5 완료 기준(goal_v5.md)을 충족하는지 검증하고, 문서를 정리�
 - BaseStructureMapper, MarineStructureMapper, StatuteStructureMapper, mapper_factory 정상 동작
 - rules.py에 민법 조문 패턴 추가, line_rebuild에 제 N조 패턴 반영
 - DB 생성 탭에서 문서 타입(해양규칙/법령) 선택 가능
-- Chunk/임베딩 전 매퍼 호환성 검사, 불일치 시 경고 팝업(중단/강제 진행)
+- **추출 직전** 매퍼 호환성 검사(Dry-run), 불일치 시 추출 차단
 - 해양규칙 PDF → Canonical 변환 결과 기존과 동일
 - 민법 PDF → Canonical 변환 시 "제 N조" structure_path 정상 표시
 - 기존 RAG, Web Client, 서버 서비스 기능 유지
@@ -431,7 +513,7 @@ V5 완료 기준(goal_v5.md)을 충족하는지 검증하고, 문서를 정리�
    └── line_rebuild.py      (V5 수정)
    ```
 
-### Phase 6에서 다루는 소스
+### Phase 7에서 다루는 소스
 
 | 파일 | 내용 |
 |------|------|
@@ -443,23 +525,24 @@ V5 완료 기준(goal_v5.md)을 충족하는지 검증하고, 문서를 정리�
 
 1. 해양규칙 PDF로 doc_type "해양규칙" 선택 → 전체 파이프라인 실행 → RAG 질의 응답 확인
 2. 민법 PDF로 doc_type "법령" 선택 → 전체 파이프라인 실행 → RAG 질의 응답 및 출처(제 N조) 확인
-3. 서버 서비스, Web Client, 기존 탭 기능 회귀 없음 확인
+3. 민법 PDF + 해양규칙 선택 → 추출 차단 확인
+4. 서버 서비스, Web Client, 기존 탭 기능 회귀 없음 확인
 
 ### 진도 체크
 
 - [ ] BaseStructureMapper, Marine/Statute Mapper, mapper_factory 동작 확인
-- [ ] rules.py, line_rebuild.py 확장 검증
-- [ ] DB 생성 탭 doc_type 선택, Canonical 변환 연동, 매퍼 호환성 검사 안전장치 확인
+- [ ] 매퍼 적용 시점 전진(PDF→Raw) 검증
+- [ ] DB 생성 탭 doc_type 선택, 추출 직전 Dry-run 확인
 - [ ] 해양규칙/민법 전체 파이프라인 검증
 - [ ] 기존 RAG, Web Client, 서버 기능 유지
 - [ ] `readme.md` 갱신
 - [ ] `phase_v5.md` 진도 반영
 - [ ] 수동 검증 완료
 
-### Phase 6 완료 시 커밋
+### Phase 7 완료 시 커밋
 
 ```
-docs: Phase 6 — V5 통합 검증 및 문서화
+docs: Phase 7 — V5 통합 검증 및 문서화
 
 - readme.md: V5 멀티 문서 지원
 - phase_v5.md: 진도 반영
@@ -476,6 +559,7 @@ docs: Phase 6 — V5 통합 검증 및 문서화
 | 3 | `src/core/marine_mapper.py`, `rule_marine_regulation.py`, `base_mapper.py` | goal_v5.md §2-2-1 |
 | 4 | `src/core/statute_mapper.py`, `mapper_factory.py` | goal_v5.md §2-2-2, §2-3 |
 | 5 | `src/ui/tabs/tab_db_create.py`, `mapper_factory.py`, `base_mapper.py` | goal_v5.md §2-5, §2-6 |
-| 6 | `readme.md`, `phase_v5.md`, `project_overview.md` | goal_v5.md §3, §4 |
+| 6 | `extract_pdf_raw.py`, `line_rebuild.py`, `base_mapper.py`, `tab_db_create.py` | goal_v5.md §2-8 |
+| 7 | `readme.md`, `phase_v5.md`, `project_overview.md` | goal_v5.md §3, §4 |
 
 매 Phase는 위 표에 해당하는 파일만 열어 작업하면 토큰 사용을 최소화할 수 있다.

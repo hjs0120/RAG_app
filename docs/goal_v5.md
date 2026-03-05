@@ -36,16 +36,16 @@ PDF 선택 → Raw 추출 → map_to_canonical(rule_marine_regulation)
 
 ---
 
-## 1.2 V5 구조
+## 1.2 V5 구조 (현재 구현 — Phase 1~5)
 
 ```
 PDF 선택 + 문서 타입 선택
         ↓
-Raw 추출 (extract_pdf_raw.py)
+Raw 추출 (extract_pdf_raw.py) — 고정 규칙, 매퍼 미사용
         ↓
 Mapper Factory → doc_type에 따라 적절한 Mapper 반환
         ↓
-BaseStructureMapper 구현체
+Raw → Canonical 변환 (BaseStructureMapper)
   ├─ MarineStructureMapper (해양규칙: 101. 형식)
   └─ StatuteStructureMapper (민법 등: 제 N조 형식)
         ↓
@@ -54,9 +54,29 @@ Canonical JSON (기존 스키마 유지)
 Chunk → 임베딩 → RAG
 ```
 
+## 1.3 V5 구조 재구성 (목표 아키텍처)
+
+매퍼 적용 시점을 **Raw → Canonical**에서 **PDF → Raw**로 전진 배치한다.
+
+```
+PDF 선택 + 문서 타입 선택
+        ↓
+check_compatibility (Dry-run: 5페이지만 선행 추출)
+        ↓ 통과 시
+Raw 추출 (extract_pdf_raw) — 매퍼 규칙 주입
+  ├─ MarineStructureMapper 규칙 → 101. 기준 블록 분할
+  └─ StatuteStructureMapper 규칙 → 제 N조 기준 블록 분할
+        ↓
+Raw JSONL (형식에 맞게 이미 쪼개진 블록)
+        ↓
+Raw → Canonical 변환 (단순 스키마 변환, 패턴 매칭 최소화)
+        ↓
+Canonical JSON → Chunk → 임베딩 → RAG
+```
+
 핵심 목표:
 
-> 문서 유형별 파싱 로직을 전략 패턴으로 분리하여, 새 문서 타입 추가 시 기존 코드 수정 없이 확장 가능하게 한다.
+> 문서 유형별로 PDF → Raw 추출 규칙을 매퍼로 주입하여, 민법은 제 N조 기준, 해양규칙은 101. 기준으로 정확한 Raw 블록을 생성한다. Raw → Canonical은 이미 정형화된 Raw를 스키마로 옮기는 단순 변환으로 단순화한다.
 
 ---
 
@@ -132,11 +152,10 @@ Chunk → 임베딩 → RAG
 * **민법 조문 패턴 추가**: `match_article_statute()` 또는 `classify_line(doc_type)` 오버로드
 * **상수화**: `RE_ARTICLE_MARINE`, `RE_ARTICLE_STATUTE` 등 패턴 분리
 
-### 2-4-2. line_rebuild.py
+### 2-4-2. line_rebuild.py (현재)
 
-* **현재**: `_RE_NEW_SECTION`에 `제 N 조` 패턴 없음 → 민법 "제 1조"가 문단 구분으로 인식되지 않음
-* **변경**: Mapper에서 주입받거나, 공통 패턴 리스트(`RE_NEW_SECTION_EXTRA`)를 확장하여 "제 N조" 추가
-* **목적**: 민법에서 문단 병합 시 조문 경계가 깨지지 않도록 함
+* **Phase 2 완료**: `_RE_NEW_SECTION`에 `제 N조` 패턴 추가 — 공통 패턴으로 두 형식 모두 처리
+* **재구성 시**: Mapper에서 주입받는 동적 패턴으로 전환 (§2-8 참조)
 
 ---
 
@@ -168,11 +187,8 @@ Chunk → 임베딩 → RAG
 ### 2-6-3. Dry-run 프로세스
 
 * **위치**: `tab_db_create.py`
-* **시점**: Chunk 생성 또는 임베딩 실행 직전
-* **절차**:
-  1. 현재 `doc_type`에 해당하는 Mapper 획득
-  2. `raw_blocks`(앞 5페이지 이내)로 `check_compatibility` 호출
-  3. 결과가 `(False, 0)`이면 경고 팝업 표시 후 사용자 선택 대기
+* **시점 (현재)**: Chunk 생성 또는 임베딩 실행 직전
+* **시점 (재구성 후)**: **Raw 추출 시작 직전** — 5페이지만 선행 추출 → `check_compatibility` → 통과 시 전체 추출, 실패 시 추출 자체를 하지 않음
 
 ### 2-6-4. 경고 팝업
 
@@ -193,21 +209,57 @@ Chunk → 임베딩 → RAG
 
 ---
 
+# 2-8. 구조 재구성 — 매퍼 적용 시점 변경
+
+현재 매퍼가 Raw → Canonical 단계에서만 작동한다. 이를 **PDF → Raw (extract_pdf_raw) 단계로 전진 배치**하여 구조를 재구성한다.
+
+## 2-8-1. 매퍼 주입 (Dependency Injection)
+
+* **대상**: `extract_pdf_raw.py`
+* **변경**: 함수들이 고정된 `_RE_NEW_SECTION`을 사용하는 대신, MapperFactory로부터 받은 매퍼의 규칙을 인자로 전달받아 사용
+* **방식**: `extract_raw(pdf_path, ..., section_pattern=None)` — `section_pattern`이 없으면 기존 기본값, 있으면 매퍼가 제공하는 정규식 사용
+
+## 2-8-2. line_rebuild.py 유연화
+
+* **대상**: `line_rebuild.py`의 `rebuild_lines()`
+* **변경**: 섹션을 나누는 기준(`_RE_NEW_SECTION`)을 매퍼가 제공하는 정규식 패턴으로 동적 교체
+* **인터페이스**: `BaseStructureMapper`에 `get_section_pattern() -> re.Pattern` 또는 `get_new_section_re()` 메서드 추가
+* **결과**: 민법은 제 N조를 기준으로, 해양규칙은 101.을 기준으로 정확한 Raw 블록 생성
+
+## 2-8-3. Raw → Canonical 단계 단순화
+
+* **전제**: 이미 매퍼 규칙대로 정확하게 쪼개진 Raw 블록이 생성됨
+* **변경**: Canonical 변환 단계에서는 복잡한 패턴 매칭 없이 Raw의 정보를 Canonical Schema로 옮기기만 함
+* **효과**: `map_to_canonical` 로직 단순화, 구조 해석 부담 감소
+
+## 2-8-4. 적합성 검사 위치 조정
+
+* **시점**: `check_compatibility`는 **추출 시작 직전**에 수행
+* **절차**:
+  1. 5페이지만 `extract_raw(..., max_pages=5)`로 선행 추출 (Dry-run)
+  2. `check_compatibility(raw_blocks)` 호출
+  3. 통과 시 → 해당 매퍼 규칙을 `extract_pdf_raw`에 주입하여 전체 추출
+  4. 실패 시 → 추출 자체를 수행하지 않음 (경고 팝업, [중단]/[강제 진행])
+
+---
+
 # 3. 모듈 구조 요약
 
 ## 3-1. 신규/변경 파일
 
 ```
 src/core/
-├── base_mapper.py          # 신규: BaseStructureMapper (map_to_canonical, check_compatibility)
-├── marine_mapper.py        # 신규 또는 rule_marine_regulation.py 리팩토링
-├── statute_mapper.py       # 신규: StatuteStructureMapper (민법용)
-├── mapper_factory.py       # 신규: doc_type → Mapper 인스턴스
-├── rules.py                # 수정: 조문 패턴 확장 (민법 "제 N조")
-└── line_rebuild.py         # 수정: _RE_NEW_SECTION에 "제 N조" 패턴 추가
+├── base_mapper.py          # BaseStructureMapper (get_section_pattern 추가 예정)
+├── marine_mapper.py        # MarineStructureMapper
+├── statute_mapper.py       # StatuteStructureMapper (민법용)
+├── mapper_factory.py       # doc_type → Mapper 인스턴스
+├── extract_pdf_raw.py      # 수정(재구성): 매퍼 규칙 주입, max_pages
+├── line_rebuild.py         # 수정(재구성): 매퍼 제공 패턴으로 동적 교체
+├── rules.py                # 조문 패턴 (민법 "제 N조")
+└── rule_marine_regulation.py  # 래퍼 유지
 
 src/ui/tabs/
-└── tab_db_create.py        # 수정: doc_type 선택 UI, mapper_factory 연동
+└── tab_db_create.py        # doc_type 선택 UI, 추출 직전 Dry-run
 ```
 
 ---
@@ -224,6 +276,7 @@ src/ui/tabs/
 | **P1** | Mapper Factory | `doc_type` → Mapper 반환 | `mapper_factory.py` |
 | **P2** | UI 연동 | DB 생성 탭에 `doc_type` 선택 추가 | `tab_db_create.py` |
 | **P2** | 안전장치 | check_compatibility, Dry-run, 경고 팝업, 로그 | `base_mapper.py`, `tab_db_create.py` |
+| **P3** | 구조 재구성 | 매퍼를 PDF→Raw 단계로 전진, line_rebuild 매퍼 주입 | goal_v5 §2-8, phase_v5 구조 재구성 지시 |
 
 ---
 
