@@ -10,12 +10,13 @@ from typing import Any
 _RE_TOC = re.compile(r"차\s*례")
 # 본문 장 헤더: 줄 시작에 "제 N 장"
 _RE_CHAPTER = re.compile(r"^제\s*\d+\s*장")
-# 목차 항목: 줄 끝에 공백/점 뒤 쪽번호(숫자)가 있으면 목차 줄로 간주 (본문 아님)
-_RE_TOC_PAGE_NUMBER = re.compile(r"[.\s]+\d+\s*$")
+# 목차 항목: 줄 끝에 점(.) 2개 이상 + 쪽번호가 있으면 목차 줄로 간주.
+# 주의: "제 1장 통칙 31"처럼 본문 쪽번호(공백+숫자만)는 제외 — 과도한 skip 방지.
+_RE_TOC_PAGE_NUMBER = re.compile(r"\.{2,}\s*\d+\s*$")
 
 
 def _is_toc_entry_line(text: str) -> bool:
-    """목차 페이지에서 '제 n 장 총칙 ........ 7' 형태처럼 끝에 쪽번호가 있으면 True."""
+    """목차 페이지에서 '제 n 장 총칙 ........ 7' 형태(점 2개 이상 + 쪽번호)면 True."""
     return bool(_RE_TOC_PAGE_NUMBER.search(text))
 
 

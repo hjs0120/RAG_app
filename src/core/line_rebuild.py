@@ -30,7 +30,9 @@ _RE_STRUCTURAL_HEADER = re.compile(r"^제\s*\d+\s*[장절]")  # 장/절 헤더 �
 _RE_HEADER_TITLE_ONLY = re.compile(r"^[가-힣\s]{1,20}$")  # 한글 1~20자 (총칙, 일반사항 등)
 
 
-def _is_continuation(prev_text: str, curr_text: str) -> bool:
+def _is_continuation(
+    prev_text: str, curr_text: str, new_section_pattern: re.Pattern[str]
+) -> bool:
     """
     curr가 prev의 문단 연속인지 판단.
     - prev가 쉼표/콜론/접속사로 끝 → 연속
@@ -41,7 +43,7 @@ def _is_continuation(prev_text: str, curr_text: str) -> bool:
     curr = curr_text.strip()
     if not prev or not curr:
         return False
-    if _RE_NEW_SECTION.match(curr):
+    if new_section_pattern.match(curr):
         return False
     if _RE_SENTENCE_END.search(prev):
         return False
@@ -65,6 +67,7 @@ def rebuild_lines(
     y_tolerance: float = 2.0,
     hyphen_merge: bool = False,
     paragraph_merge: bool = True,
+    new_section_pattern: re.Pattern[str] | None = None,
 ) -> list[dict]:
     """
     같은 y 좌표 라인 병합, 하이픈 줄바꿈 병합, 문단 연속 병합.
@@ -74,6 +77,7 @@ def rebuild_lines(
         y_tolerance: 같은 줄로 볼 y 거리 (포인트)
         hyphen_merge: True면 이전 라인 끝이 '-'로 끝날 때 다음 라인과 합침
         paragraph_merge: True면 문단 연속(쉼표/접속사 이어짐) 라인 병합
+        new_section_pattern: doc_type별 새 섹션 패턴 (None이면 기본 _RE_NEW_SECTION)
 
     Returns:
         재구성된 라인 리스트. page별 line_no는 1부터 재부여.
@@ -112,11 +116,12 @@ def rebuild_lines(
                         continue
             merged.append({"text": text, "bbox": list(bbox), "page": page, "segments": segs})
 
-        merged = _merge_header_title_continuations(merged, page)
+        section_re = new_section_pattern if new_section_pattern is not None else _RE_NEW_SECTION
+        merged = _merge_header_title_continuations(merged, page, section_re)
         if hyphen_merge:
             merged = _merge_hyphen_breaks(merged, page)
         if paragraph_merge:
-            merged = _merge_paragraph_continuations(merged, page)
+            merged = _merge_paragraph_continuations(merged, page, section_re)
 
         for i, ln in enumerate(merged, start=1):
             ln["line_no"] = i
@@ -125,7 +130,9 @@ def rebuild_lines(
     return out
 
 
-def _merge_header_title_continuations(lines: list[dict], page: int) -> list[dict]:
+def _merge_header_title_continuations(
+    lines: list[dict], page: int, new_section_pattern: re.Pattern[str]
+) -> list[dict]:
     """
     "제 1 장" 다음 "총칙" → "제 1 장 총칙" 같이 장/절 제목만 이어붙임.
     goal: chapter="제 1 장 총칙", section="제 1 절 일반사항" 전체 텍스트 확보.
@@ -147,7 +154,7 @@ def _merge_header_title_continuations(lines: list[dict], page: int) -> list[dict
                 continue
             # 이전이 장/절 헤더(제목만 있거나 짧은 rest)이고, 다음이 제목 연속(한글 1~20자, 구조 아님)
             if _RE_STRUCTURAL_HEADER.match(text) and _RE_HEADER_TITLE_ONLY.match(next_text):
-                if not _RE_NEW_SECTION.match(next_text) and len(next_text) <= 20:
+                if not new_section_pattern.match(next_text) and len(next_text) <= 20:
                     text = text + " " + next_text
                     bbox = _bbox_union(bbox, next_ln["bbox"])
                     segs = segs + (next_ln.get("segments") or [{"text": next_text, "bold": False}])
@@ -163,7 +170,9 @@ def _merge_header_title_continuations(lines: list[dict], page: int) -> list[dict
     return result
 
 
-def _merge_paragraph_continuations(lines: list[dict], page: int) -> list[dict]:
+def _merge_paragraph_continuations(
+    lines: list[dict], page: int, new_section_pattern: re.Pattern[str]
+) -> list[dict]:
     """
     문단 연속(쉼표/접속사 이어짐, 같은 내용 이어짐)인 라인을 병합.
     예: "(2) 보통(FAIR):" 설명 3줄, "502.의 2항의 (4)호, (5)호, ..." 여러 줄.
@@ -180,7 +189,7 @@ def _merge_paragraph_continuations(lines: list[dict], page: int) -> list[dict]:
         while i + 1 < len(lines):
             next_ln = lines[i + 1]
             next_text = next_ln.get("text", "").strip()
-            if not _is_continuation(text, next_text):
+            if not _is_continuation(text, next_text, new_section_pattern):
                 break
             text = text + " " + next_text
             bbox = _bbox_union(bbox, next_ln["bbox"])

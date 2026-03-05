@@ -441,8 +441,19 @@ class ExtractWorker(QObject):
     finished = Signal(list)
     error = Signal(str)
 
-    def __init__(self, pdf_path: str, doc_id: str, after_toc: bool, exclude_header_footer: bool,
-                 table_caption_only: bool, figure_caption_only: bool, exclude_equation: bool, parent=None):
+    def __init__(
+        self,
+        pdf_path: str,
+        doc_id: str,
+        after_toc: bool,
+        exclude_header_footer: bool,
+        table_caption_only: bool,
+        figure_caption_only: bool,
+        exclude_equation: bool,
+        *,
+        new_section_pattern=None,
+        parent=None,
+    ):
         super().__init__(parent)
         self._pdf_path = pdf_path
         self._doc_id = doc_id
@@ -451,6 +462,7 @@ class ExtractWorker(QObject):
         self._table_caption_only = table_caption_only
         self._figure_caption_only = figure_caption_only
         self._exclude_equation = exclude_equation
+        self._new_section_pattern = new_section_pattern
 
     def run(self) -> None:
         try:
@@ -462,6 +474,7 @@ class ExtractWorker(QObject):
                 table_caption_only=self._table_caption_only,
                 figure_caption_only=self._figure_caption_only,
                 exclude_equation=self._exclude_equation,
+                new_section_pattern=self._new_section_pattern,
                 progress_callback=lambda c, t: self.progress.emit(c, t),
             )
             self.finished.emit(blocks)
@@ -877,12 +890,51 @@ class TabDBCreate(QWidget):
         self._state["doc_id"] = self._edit_doc_id.text().strip() or _doc_id_from_path(paths[0])
         self._state["after_toc"] = self._check_after_toc.isChecked()
 
+        # Phase 6: 추출 직전 Dry-run (5페이지만) → check_compatibility
+        try:
+            dry_blocks = extract_raw(
+                paths[0],
+                doc_id=self._edit_doc_id.text().strip() or _doc_id_from_path(paths[0]) or "",
+                after_toc=self._check_after_toc.isChecked(),
+                exclude_header_footer=self._check_header_footer.isChecked(),
+                table_caption_only=self._check_table.isChecked(),
+                figure_caption_only=self._check_figure.isChecked(),
+                exclude_equation=self._check_equation.isChecked(),
+                max_pages=5,
+            )
+        except Exception as e:
+            self._label_extract.setText(f"Dry-run 실패: {e}")
+            return
+        doc_type = self._state.get("doc_type", "marine")
+        mapper = get_mapper(doc_type)
+        compatible, count = mapper.check_compatibility(dry_blocks, max_pages=5)
+        if not compatible:
+            logger.warning("매퍼 호환성 검사: %s, 불일치, 패턴 %d건 발견", doc_type, count)
+            box = QMessageBox(self)
+            box.setWindowTitle("매퍼 불일치")
+            box.setText(
+                "선택한 문서 타입과 실제 문서 형식이 맞지 않을 수 있습니다.\n\n"
+                "해양규칙: 101., 202. 형식\n"
+                "법령: 제 1조, 제 2조 형식\n\n"
+                "강제 진행하시겠습니까?"
+            )
+            box.setIcon(QMessageBox.Icon.Warning)
+            box.setStandardButtons(QMessageBox.StandardButton.Cancel | QMessageBox.StandardButton.Ok)
+            box.button(QMessageBox.StandardButton.Ok).setText("강제 진행")
+            box.button(QMessageBox.StandardButton.Cancel).setText("중단")
+            if box.exec() != QMessageBox.StandardButton.Ok:
+                self._label_extract.setText("추출 중단 — 매퍼 불일치.")
+                return
+        else:
+            logger.info("매퍼 호환성 검사: %s, 호환됨, 패턴 %d건 발견", doc_type, count)
+
         self._btn_extract.setEnabled(False)
         self._progress_extract.setVisible(True)
         self._progress_extract.setRange(0, 0)
         self._label_extract.setText("추출 중…")
 
         doc_id = self._edit_doc_id.text().strip() or _doc_id_from_path(paths[0])
+        section_pattern = mapper.get_section_pattern()
         self._extract_worker = ExtractWorker(
             paths[0],
             doc_id,
@@ -891,6 +943,7 @@ class TabDBCreate(QWidget):
             self._check_table.isChecked(),
             self._check_figure.isChecked(),
             self._check_equation.isChecked(),
+            new_section_pattern=section_pattern,
         )
         self._extract_thread = QThread()
         self._extract_worker.moveToThread(self._extract_thread)

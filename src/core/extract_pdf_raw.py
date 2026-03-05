@@ -35,6 +35,8 @@ def extract_raw(
     y_tolerance: float = 2.0,
     hyphen_merge: bool = False,
     paragraph_merge: bool = True,
+    max_pages: int | None = None,
+    new_section_pattern: re.Pattern[str] | None = None,
     progress_callback: Callable[[int, int], None] | None = None,
     **kwargs: Any,
 ) -> list[dict]:
@@ -56,6 +58,8 @@ def extract_raw(
         y_tolerance: 같은 줄 y 병합 허용 거리
         hyphen_merge: 하이픈 줄바꿈 병합
         paragraph_merge: 문단 연속 병합
+        max_pages: 지정 시 해당 페이지까지만 추출 (Dry-run용)
+        new_section_pattern: doc_type별 섹션 구분 패턴 (매퍼.get_section_pattern())
         progress_callback: (current_page, total_pages) 호출
 
     Returns:
@@ -74,6 +78,7 @@ def extract_raw(
         pdf_path,
         exclude_header_footer=exclude_header_footer,
         header_footer_margin_ratio=header_footer_margin_ratio,
+        max_pages=max_pages,
         progress_callback=progress_callback,
     )
 
@@ -87,6 +92,7 @@ def extract_raw(
         y_tolerance=y_tolerance,
         hyphen_merge=hyphen_merge,
         paragraph_merge=paragraph_merge,
+        new_section_pattern=new_section_pattern,
     )
 
     # 4. Normalize
@@ -116,15 +122,17 @@ def _extract_lines_with_style(
     *,
     exclude_header_footer: bool = True,
     header_footer_margin_ratio: float = 0.08,
+    max_pages: int | None = None,
     progress_callback: Callable[[int, int], None] | None = None,
 ) -> list[dict]:
     """PDF에서 라인 추출 (text, bbox, page, line_no, segments 포함 font_size)."""
     lines_out: list[dict] = []
     doc = fitz.open(pdf_path)
     total_pages = len(doc)
+    end_page = min(max_pages, total_pages) if max_pages is not None else total_pages
 
     try:
-        for page_index in range(total_pages):
+        for page_index in range(end_page):
             page = doc[page_index]
             page_no = page_index + 1
 

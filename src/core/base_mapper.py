@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -60,6 +61,15 @@ class BaseStructureMapper(ABC):
 
         해양규칙: ^(\\d{2,})\\. (101., 202.)
         법령: ^제\\s*\\d+\\s*조 (제 1조, 제 274조)
+        """
+        ...
+
+    @abstractmethod
+    def get_section_pattern(self) -> re.Pattern[str]:
+        """
+        line_rebuild에서 새 섹션/항 시작으로 인식할 정규식.
+
+        문서 타입별로 조(article) 패턴만 다르고, 편/장/절/항/호/목은 공통.
         """
         ...
 

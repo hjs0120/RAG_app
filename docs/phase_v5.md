@@ -451,11 +451,11 @@ feat(ui): Phase 5 — DB 생성 탭 doc_type 선택, Mapper 연동, 매퍼 호�
 
 ### 진도 체크
 
-- [ ] extract_pdf_raw: 매퍼 규칙 주입, max_pages 파라미터
-- [ ] BaseStructureMapper: get_section_pattern() 추가
-- [ ] line_rebuild: 동적 패턴 사용
-- [ ] tab_db_create: 추출 직전 Dry-run, 검사 통과 시 매퍼 주입
-- [ ] Raw → Canonical 단순화
+- [x] extract_pdf_raw: 매퍼 규칙 주입, max_pages 파라미터
+- [x] BaseStructureMapper: get_section_pattern() 추가
+- [x] line_rebuild: 동적 패턴 사용
+- [x] tab_db_create: 추출 직전 Dry-run, 검사 통과 시 매퍼 주입
+- [x] Raw → Canonical 단순화 (동적 패턴으로 Raw 블록 정확 분할 → 변환 품질 향상)
 - [ ] 수동 검증 완료
 
 ### Phase 6 완료 시 커밋
